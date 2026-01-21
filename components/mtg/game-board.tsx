@@ -585,7 +585,7 @@ export function GameBoard() {
       </header>
 
       {/* Game Area */}
-      <main className="flex flex-1 flex-col gap-2 overflow-hidden p-2">
+      <main className="flex flex-1 flex-col gap-2 p-2">
         {/* Opponent Area */}
         <PlayerArea
           player={gameState.opponent}
