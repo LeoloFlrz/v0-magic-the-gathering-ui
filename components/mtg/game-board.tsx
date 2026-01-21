@@ -1,0 +1,678 @@
+"use client"
+
+import { useState, useCallback, useEffect } from "react"
+import {
+  RotateCcw,
+  SkipForward,
+  Swords,
+  Dices,
+  ScrollText,
+  ChevronRight,
+  Target,
+  Sparkles,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { PlayerArea } from "./player-area"
+import { GameLobby } from "./game-lobby"
+import type { GameState, Card, GameZone, GamePhase, GameConfig } from "@/lib/mtg/types"
+import { PHASE_NAMES } from "@/lib/mtg/types"
+import {
+  createInitialGameState,
+  drawCard,
+  playCard,
+  tapCard,
+  untapAll,
+  moveCard,
+  castCommander,
+  returnCommanderToZone,
+  getNextPhase,
+  PHASE_ORDER,
+  addNegativeCounter,
+} from "@/lib/mtg/game-utils"
+
+export function GameBoard() {
+  const [gameStarted, setGameStarted] = useState(false)
+  const [gameConfig, setGameConfig] = useState<GameConfig | null>(null)
+  const [gameState, setGameState] = useState<GameState | null>(null)
+  const [selectedCard, setSelectedCard] = useState<{
+    card: Card
+    zone: keyof GameZone
+    owner: "player" | "opponent"
+  } | null>(null)
+  const [showLog, setShowLog] = useState(false)
+  const [diceResult, setDiceResult] = useState<number | null>(null)
+  const [isRolling, setIsRolling] = useState(false)
+  const [aiThinking, setAiThinking] = useState(false)
+  const [drawingCardId, setDrawingCardId] = useState<string | null>(null)
+  const [counterTargetMode, setCounterTargetMode] = useState(false)
+
+  const handleStartGame = (config: GameConfig) => {
+    setGameConfig(config)
+    setGameState(createInitialGameState(config))
+    setGameStarted(true)
+  }
+
+  const addLog = useCallback((message: string) => {
+    setGameState((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        log: [...prev.log, `[T${prev.turn}] ${message}`],
+      }
+    })
+  }, [gameState])
+
+  // Handle card click
+  const handleCardClick = useCallback(
+    (card: Card, zone: keyof GameZone, owner: "player" | "opponent") => {
+      if (!gameState) return
+
+      // Counter target mode - add -1/-1 counter
+      if (counterTargetMode && zone === "battlefield") {
+        setGameState((prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            [owner]: addNegativeCounter(prev[owner], card.id),
+          }
+        })
+        addLog(`Pones un contador -1/-1 en ${card.name}`)
+        setCounterTargetMode(false)
+        return
+      }
+
+      if (owner === "opponent" && zone === "hand") return
+
+      // If clicking on battlefield card, toggle tap
+      if (zone === "battlefield" && owner === "player") {
+        setGameState((prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            player: tapCard(prev.player, card.id),
+          }
+        })
+        addLog(`${card.isTapped ? "Enderezas" : "Giras"} ${card.name}`)
+        return
+      }
+
+      // If clicking card in hand during main phase, play it
+      if (
+        zone === "hand" &&
+        owner === "player" &&
+        (gameState.phase === "main1" || gameState.phase === "main2") &&
+        gameState.activePlayer === "player"
+      ) {
+        setGameState((prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            player: playCard(prev.player, card.id),
+          }
+        })
+        addLog(`Juegas ${card.name}`)
+        return
+      }
+
+      setSelectedCard({ card, zone, owner })
+    },
+    [gameState, addLog, counterTargetMode]
+  )
+
+  // Handle play card from drag and drop
+  const handlePlayCard = useCallback(
+    (cardId: string) => {
+      if (!gameState) return
+
+      const card = gameState.player.zones.hand.find((c) => c.id === cardId)
+      if (!card) return
+
+      if (
+        (gameState.phase === "main1" || gameState.phase === "main2") &&
+        gameState.activePlayer === "player"
+      ) {
+        setGameState((prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            player: playCard(prev.player, cardId),
+          }
+        })
+        addLog(`Juegas ${card.name}`)
+      }
+    },
+    [gameState, addLog]
+  )
+
+  // Handle card action from context menu
+  const handleCardAction = useCallback(
+    (card: Card, zone: keyof GameZone, action: string) => {
+      switch (action) {
+        case "tap":
+          setGameState((prev) => {
+            if (!prev) return prev
+            return {
+              ...prev,
+              player: tapCard(prev.player, card.id),
+            }
+          })
+          break
+        case "to_graveyard":
+          setGameState((prev) => {
+            if (!prev) return prev
+            return {
+              ...prev,
+              player: card.isCommander
+                ? returnCommanderToZone(prev.player, card.id)
+                : moveCard(prev.player, card.id, zone, "graveyard"),
+            }
+          })
+          addLog(`${card.name} va al ${card.isCommander ? "zona de mando" : "cementerio"}`)
+          break
+        case "to_exile":
+          setGameState((prev) => {
+            if (!prev) return prev
+            return {
+              ...prev,
+              player: card.isCommander
+                ? returnCommanderToZone(prev.player, card.id)
+                : moveCard(prev.player, card.id, zone, "exile"),
+            }
+          })
+          addLog(`${card.name} es exiliado`)
+          break
+        case "to_hand":
+          setGameState((prev) => {
+            if (!prev) return prev
+            return {
+              ...prev,
+              player: moveCard(prev.player, card.id, zone, "hand"),
+            }
+          })
+          addLog(`${card.name} vuelve a tu mano`)
+          break
+        case "add_counter":
+          setCounterTargetMode(true)
+          addLog("Selecciona una criatura para poner un contador -1/-1")
+          break
+      }
+      setSelectedCard(null)
+    },
+    [addLog]
+  )
+
+  // Draw card for player with animation
+  const handleDrawCard = useCallback(() => {
+    if (!gameState) return
+
+    const { player: newPlayer, drawnCard } = drawCard(gameState.player)
+    if (drawnCard) {
+      setDrawingCardId(drawnCard.id)
+      setGameState((prev) => {
+        if (!prev) return prev
+        return { ...prev, player: newPlayer }
+      })
+      addLog(`Robas ${drawnCard.name}`)
+
+      // Clear animation after it completes
+      setTimeout(() => {
+        setDrawingCardId(null)
+      }, 500)
+    } else {
+      addLog("No quedan cartas en la biblioteca!")
+    }
+  }, [gameState, addLog])
+
+  // Cast commander
+  const handleCastCommander = useCallback(() => {
+    if (!gameState) return
+
+    if (
+      gameState.player.zones.commandZone.length > 0 &&
+      (gameState.phase === "main1" || gameState.phase === "main2")
+    ) {
+      setGameState((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          player: castCommander(prev.player),
+        }
+      })
+      addLog(`Lanzas a tu comandante ${gameState.player.zones.commandZone[0]?.name}`)
+    }
+  }, [gameState, addLog])
+
+  // Change life total
+  const handleLifeChange = useCallback(
+    (who: "player" | "opponent", amount: number) => {
+      setGameState((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          [who]: { ...prev[who], life: prev[who].life + amount },
+        }
+      })
+    },
+    []
+  )
+
+  // Advance to next phase
+  const advancePhase = useCallback(() => {
+    if (!gameState) return
+
+    setGameState((prev) => {
+      if (!prev) return prev
+
+      const nextPhase = getNextPhase(prev.phase)
+      let newState = { ...prev, phase: nextPhase }
+
+      // Handle phase transitions
+      if (nextPhase === "untap" && prev.phase === "cleanup") {
+        // New turn
+        const newActivePlayer = prev.activePlayer === "player" ? "opponent" : "player"
+        newState = {
+          ...newState,
+          turn: prev.turn + (newActivePlayer === "player" ? 1 : 0),
+          activePlayer: newActivePlayer,
+          priorityPlayer: newActivePlayer,
+          [newActivePlayer]: untapAll(prev[newActivePlayer]),
+        }
+        addLog(`--- Turno ${newState.turn}: ${newActivePlayer === "player" ? "Tu turno" : "Turno de IA"} ---`)
+      }
+
+      if (nextPhase === "draw" && prev.phase === "upkeep") {
+        // Draw phase
+        const { player: updatedPlayer, drawnCard } = drawCard(newState[newState.activePlayer])
+        if (drawnCard) {
+          if (newState.activePlayer === "player") {
+            setDrawingCardId(drawnCard.id)
+            setTimeout(() => setDrawingCardId(null), 500)
+          }
+          newState = {
+            ...newState,
+            [newState.activePlayer]: updatedPlayer,
+          }
+          if (newState.activePlayer === "player") {
+            addLog(`Robas ${drawnCard.name}`)
+          } else {
+            addLog("IA roba una carta")
+          }
+        }
+      }
+
+      return newState
+    })
+  }, [gameState, addLog])
+
+  // Pass turn (skip to cleanup)
+  const passTurn = useCallback(() => {
+    if (!gameState) return
+
+    setGameState((prev) => {
+      if (!prev) return prev
+
+      const newActivePlayer = prev.activePlayer === "player" ? "opponent" : "player"
+      return {
+        ...prev,
+        phase: "untap",
+        turn: prev.turn + (newActivePlayer === "player" ? 1 : 0),
+        activePlayer: newActivePlayer,
+        priorityPlayer: newActivePlayer,
+        [newActivePlayer]: untapAll(prev[newActivePlayer]),
+      }
+    })
+    addLog(`--- Turno ${gameState.turn + (gameState.activePlayer === "opponent" ? 1 : 0)}: ${gameState.activePlayer === "player" ? "Turno de IA" : "Tu turno"} ---`)
+  }, [gameState, addLog])
+
+  // Simple AI logic
+  useEffect(() => {
+    if (!gameState || gameState.activePlayer !== "opponent") return
+
+    setAiThinking(true)
+    const timeout = setTimeout(() => {
+      setGameState((prev) => {
+        if (!prev) return prev
+
+        let newOpponent = prev.opponent
+
+        // Main phase - play cards
+        if (prev.phase === "main1" || prev.phase === "main2") {
+          // Try to play a land
+          const landInHand = newOpponent.zones.hand.find((c) => c.type === "land")
+          if (landInHand) {
+            newOpponent = playCard(newOpponent, landInHand.id)
+            addLog(`IA juega ${landInHand.name}`)
+          }
+
+          // Try to play a creature
+          const creatureInHand = newOpponent.zones.hand.find(
+            (c) => c.type === "creature" && c.cmc <= newOpponent.zones.battlefield.filter((b) => b.type === "land" && !b.isTapped).length
+          )
+          if (creatureInHand) {
+            newOpponent = playCard(newOpponent, creatureInHand.id)
+            // Tap lands for mana
+            const landsToTap = newOpponent.zones.battlefield
+              .filter((c) => c.type === "land" && !c.isTapped)
+              .slice(0, creatureInHand.cmc)
+            for (const land of landsToTap) {
+              newOpponent = tapCard(newOpponent, land.id)
+            }
+            addLog(`IA juega ${creatureInHand.name}`)
+          }
+        }
+
+        return { ...prev, opponent: newOpponent }
+      })
+
+      // AI passes after main phase actions
+      setTimeout(() => {
+        passTurn()
+        setAiThinking(false)
+      }, 1000)
+    }, 1500)
+
+    return () => clearTimeout(timeout)
+  }, [gameState, addLog, passTurn])
+
+  // Dice roller
+  const rollDice = (sides: number = 20) => {
+    setIsRolling(true)
+    let rolls = 0
+    const maxRolls = 10
+    const interval = setInterval(() => {
+      setDiceResult(Math.floor(Math.random() * sides) + 1)
+      rolls++
+      if (rolls >= maxRolls) {
+        clearInterval(interval)
+        setIsRolling(false)
+      }
+    }, 80)
+  }
+
+  // Reset game
+  const resetGame = () => {
+    setGameStarted(false)
+    setGameState(null)
+    setGameConfig(null)
+    setSelectedCard(null)
+    setDiceResult(null)
+    setCounterTargetMode(false)
+  }
+
+  // Show lobby if game hasn't started
+  if (!gameStarted || !gameState) {
+    return <GameLobby onStartGame={handleStartGame} />
+  }
+
+  return (
+    <div className="flex h-screen flex-col bg-background">
+      {/* Header */}
+      <header className="shrink-0 border-b border-border bg-card px-4 py-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
+              <span className="text-lg font-bold text-primary-foreground">M</span>
+            </div>
+            <div>
+              <h1 className="text-sm font-semibold text-foreground">MTG Commander</h1>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Turno {gameState.turn}</span>
+                <ChevronRight className="h-3 w-3" />
+                <span className="font-medium text-foreground">
+                  {PHASE_NAMES[gameState.phase]}
+                </span>
+                {aiThinking && (
+                  <span className="ml-2 animate-pulse text-amber-400">IA pensando...</span>
+                )}
+                {counterTargetMode && (
+                  <span className="ml-2 flex items-center gap-1 text-purple-400">
+                    <Target className="h-3 w-3" />
+                    Selecciona objetivo para -1/-1
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center gap-2">
+            {/* Phase indicator */}
+            <div className="mr-2 hidden items-center gap-1 md:flex">
+              {PHASE_ORDER.slice(0, 6).map((phase) => (
+                <div
+                  key={phase}
+                  className={`h-2 w-2 rounded-full transition-colors ${
+                    gameState.phase === phase
+                      ? "bg-primary"
+                      : PHASE_ORDER.indexOf(phase) < PHASE_ORDER.indexOf(gameState.phase)
+                        ? "bg-primary/30"
+                        : "bg-muted"
+                  }`}
+                  title={PHASE_NAMES[phase]}
+                />
+              ))}
+            </div>
+
+            {/* Add -1/-1 Counter Button */}
+            <Button
+              variant={counterTargetMode ? "default" : "secondary"}
+              size="sm"
+              onClick={() => setCounterTargetMode(!counterTargetMode)}
+              className="gap-1"
+            >
+              <Sparkles className="h-4 w-4" />
+              <span className="hidden sm:inline">-1/-1</span>
+            </Button>
+
+            {/* Next Phase */}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={advancePhase}
+              disabled={gameState.activePlayer !== "player"}
+              className="gap-1"
+            >
+              <ChevronRight className="h-4 w-4" />
+              <span className="hidden sm:inline">Fase</span>
+            </Button>
+
+            {/* Pass Turn */}
+            <Button
+              variant="default"
+              size="sm"
+              onClick={passTurn}
+              disabled={gameState.activePlayer !== "player"}
+              className="gap-1"
+            >
+              <SkipForward className="h-4 w-4" />
+              <span className="hidden sm:inline">Pasar Turno</span>
+            </Button>
+
+            {/* Dice Roller */}
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="secondary" size="icon" className="relative">
+                  <Dices className="h-4 w-4" />
+                  {diceResult !== null && (
+                    <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                      {diceResult}
+                    </span>
+                  )}
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Tirar Dados</DialogTitle>
+                  <DialogDescription>Selecciona el tipo de dado</DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col items-center gap-4 py-4">
+                  {diceResult !== null && (
+                    <div
+                      className={`flex h-20 w-20 items-center justify-center rounded-xl bg-primary text-3xl font-bold text-primary-foreground ${
+                        isRolling ? "animate-pulse" : ""
+                      }`}
+                    >
+                      {diceResult}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-2">
+                    {[4, 6, 8, 10, 12, 20].map((sides) => (
+                      <Button
+                        key={sides}
+                        variant="secondary"
+                        className="h-12 w-12"
+                        onClick={() => rollDice(sides)}
+                        disabled={isRolling}
+                      >
+                        d{sides}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* Game Log */}
+            <Dialog open={showLog} onOpenChange={setShowLog}>
+              <DialogTrigger asChild>
+                <Button variant="secondary" size="icon">
+                  <ScrollText className="h-4 w-4" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Historial de Partida</DialogTitle>
+                </DialogHeader>
+                <ScrollArea className="h-[400px] pr-4">
+                  <div className="space-y-1">
+                    {gameState.log.map((entry, i) => (
+                      <p
+                        key={`${entry}-${i}`}
+                        className={`text-sm ${
+                          entry.startsWith("---") ? "mt-2 font-semibold text-primary" : "text-muted-foreground"
+                        }`}
+                      >
+                        {entry}
+                      </p>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </DialogContent>
+            </Dialog>
+
+            {/* Reset */}
+            <Button variant="destructive" size="icon" onClick={resetGame}>
+              <RotateCcw className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Game Area */}
+      <main className="flex flex-1 flex-col gap-2 overflow-hidden p-2">
+        {/* Opponent Area */}
+        <PlayerArea
+          player={gameState.opponent}
+          isOpponent
+          isActive={gameState.activePlayer === "opponent"}
+          onCardClick={(card, zone) => handleCardClick(card, zone, "opponent")}
+          selectedCardId={selectedCard?.card.id}
+          className="shrink-0"
+        />
+
+        {/* Divider / Stack */}
+        <div className="flex items-center justify-center gap-4 py-1">
+          <div className="h-px flex-1 bg-border" />
+          <Swords className="h-5 w-5 text-muted-foreground" />
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
+        {/* Player Area */}
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div className="flex-1">
+              <PlayerArea
+                player={gameState.player}
+                isActive={gameState.activePlayer === "player"}
+                onLifeChange={(amount) => handleLifeChange("player", amount)}
+                onCardClick={(card, zone) => handleCardClick(card, zone, "player")}
+                onDrawCard={handleDrawCard}
+                onCastCommander={handleCastCommander}
+                onPlayCard={handlePlayCard}
+                selectedCardId={selectedCard?.card.id}
+                className="h-full"
+                drawingCardId={drawingCardId}
+              />
+            </div>
+          </ContextMenuTrigger>
+          {selectedCard && selectedCard.owner === "player" && (
+            <ContextMenuContent>
+              <ContextMenuItem
+                onClick={() =>
+                  handleCardAction(selectedCard.card, selectedCard.zone, "tap")
+                }
+              >
+                {selectedCard.card.isTapped ? "Enderezar" : "Girar"}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onClick={() =>
+                  handleCardAction(selectedCard.card, selectedCard.zone, "add_counter")
+                }
+              >
+                Poner contador -1/-1
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onClick={() =>
+                  handleCardAction(selectedCard.card, selectedCard.zone, "to_graveyard")
+                }
+              >
+                Enviar al Cementerio
+              </ContextMenuItem>
+              <ContextMenuItem
+                onClick={() =>
+                  handleCardAction(selectedCard.card, selectedCard.zone, "to_exile")
+                }
+              >
+                Exiliar
+              </ContextMenuItem>
+              {selectedCard.zone !== "hand" && (
+                <ContextMenuItem
+                  onClick={() =>
+                    handleCardAction(selectedCard.card, selectedCard.zone, "to_hand")
+                  }
+                >
+                  Devolver a la Mano
+                </ContextMenuItem>
+              )}
+            </ContextMenuContent>
+          )}
+        </ContextMenu>
+      </main>
+
+      {/* Footer */}
+      <footer className="shrink-0 border-t border-border bg-card px-4 py-2">
+        <p className="text-center text-xs text-muted-foreground">
+          Arrastra cartas de la mano al campo | Clic en permanente para girar | Clic en biblioteca para robar
+        </p>
+      </footer>
+    </div>
+  )
+}
