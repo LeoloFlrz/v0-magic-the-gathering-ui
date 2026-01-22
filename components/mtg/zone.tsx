@@ -143,7 +143,7 @@ export function Zone({
         </div>
       ) : horizontal ? (
         <ScrollArea className="w-full">
-          <div className="flex gap-2 pb-2">
+          <div className="flex gap-2 pt-2 pb-2">
             {cards.map((card) => (
               <CardComponent
                 key={card.id}
