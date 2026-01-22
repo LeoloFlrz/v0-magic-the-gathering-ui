@@ -30,7 +30,7 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
   const [playerDeckName, setPlayerDeckName] = useState("Blight Curse")
   const [deckText, setDeckText] = useState("")
   const [isLoadingDeck, setIsLoadingDeck] = useState(false)
-  const [selectedAIDeck, setSelectedAIDeck] = useState<"krenko_goblins" | "hapatra_counters">("krenko_goblins")
+  const [selectedAIDeckId, setSelectedAIDeckId] = useState<string>("")
   const [savedDecks, setSavedDecks] = useState<SavedDeck[]>([])
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [newDeckName, setNewDeckName] = useState("")
@@ -43,7 +43,12 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
 
   // Cargar decks guardados al montar el componente
   useEffect(() => {
-    setSavedDecks(getSavedDecks())
+    const decks = getSavedDecks()
+    setSavedDecks(decks)
+    // Preseleccionar el primer deck guardado si existe
+    if (decks.length > 0 && !selectedAIDeckId) {
+      setSelectedAIDeckId(decks[0].id)
+    }
   }, [])
 
   const handleDeckTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -139,7 +144,12 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
     if (!newDeckName.trim()) return
     
     saveDeck(newDeckName, playerDeck)
-    setSavedDecks(getSavedDecks())
+    const newDecks = getSavedDecks()
+    setSavedDecks(newDecks)
+    // Seleccionar automáticamente el último deck guardado (el recién creado)
+    if (newDecks.length > 0) {
+      setSelectedAIDeckId(newDecks[newDecks.length - 1].id)
+    }
     setNewDeckName("")
     setShowSaveDialog(false)
   }
@@ -147,16 +157,28 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
   const handleDeleteDeck = (id: string) => {
     if (confirm("¿Estás seguro de que quieres eliminar este mazo?")) {
       deleteDeck(id)
-      setSavedDecks(getSavedDecks())
+      const newDecks = getSavedDecks()
+      setSavedDecks(newDecks)
+      // Si se eliminó el deck seleccionado, seleccionar otro si existe
+      if (selectedAIDeckId === id && newDecks.length > 0) {
+        setSelectedAIDeckId(newDecks[0].id)
+      } else if (newDecks.length === 0) {
+        setSelectedAIDeckId("")
+      }
     }
   }
 
   const handleStart = () => {
+    // Obtener el deck de la IA seleccionada
+    const selectedAIDeckObj = savedDecks.find(deck => deck.id === selectedAIDeckId)
+    const aiDeck = selectedAIDeckObj?.cards || blightCurseDeck
+
     onStartGame({
       playerCount,
       startingLife,
       playerName,
       playerDeck,
+      aiDeck,
     })
   }
 
@@ -474,15 +496,24 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
           {/* AI Deck Selection */}
           <div className="space-y-2">
             <Label htmlFor="ai-deck">Mazo de IA oponente</Label>
-            <Select value={selectedAIDeck} onValueChange={(v: any) => setSelectedAIDeck(v)}>
-              <SelectTrigger id="ai-deck" className="bg-background">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="krenko_goblins">Krenko Goblins (Aggro)</SelectItem>
-                <SelectItem value="hapatra_counters">Hapatra Counters (-1/-1)</SelectItem>
-              </SelectContent>
-            </Select>
+            {savedDecks.length > 0 ? (
+              <Select value={selectedAIDeckId} onValueChange={setSelectedAIDeckId}>
+                <SelectTrigger id="ai-deck" className="bg-background">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {savedDecks.map((deck) => (
+                    <SelectItem key={deck.id} value={deck.id}>
+                      {deck.name} ({deck.cardCount} cartas)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="rounded-lg border border-border bg-secondary/50 p-3 text-sm text-muted-foreground">
+                📝 Carga un mazo primero para poder seleccionarlo para la IA
+              </div>
+            )}
           </div>
 
           {/* Player Count */}

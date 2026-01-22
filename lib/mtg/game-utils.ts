@@ -72,9 +72,10 @@ export function createInitialGameState(config?: GameConfig): GameState {
   
   // Usar el deck del config si existe, sino usar el deck por defecto
   const playerDeck = config?.playerDeck || blightCurseDeck
+  const opponentDeck = config?.aiDeck || aiOpponentDeck
   
   const player = initializePlayer("player", playerName, playerDeck, startingLife)
-  const opponent = initializePlayer("opponent", "IA Goblin", aiOpponentDeck, startingLife)
+  const opponent = initializePlayer("opponent", "IA Oponente", opponentDeck, startingLife)
 
   // Draw initial hands (7 cards)
   for (let i = 0; i < 7; i++) {
