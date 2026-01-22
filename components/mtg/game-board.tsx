@@ -498,8 +498,6 @@ export function GameBoard() {
 
   // Advance to next phase
   const advancePhase = useCallback(() => {
-    if (!gameState) return
-
     setGameState((prev) => {
       if (!prev) return prev
 
@@ -611,7 +609,7 @@ export function GameBoard() {
 
       return newState
     })
-  }, [gameState, addLog])
+  }, [addLog])
 
   // Pass turn (skip to cleanup)
   const passTurn = useCallback(() => {
@@ -698,6 +696,27 @@ export function GameBoard() {
     
     return () => clearTimeout(timeout)
   }, [gameState?.phase])
+
+  // Auto-advance combat phases when player is attacking
+  useEffect(() => {
+    if (!gameState || gameState.activePlayer !== "player") return
+    
+    // Auto-advance combat_damage after damage is resolved
+    if (gameState.phase === "combat_damage") {
+      const timeout = setTimeout(() => {
+        advancePhase()
+      }, 800)
+      return () => clearTimeout(timeout)
+    }
+    
+    // Auto-advance combat_end to main2
+    if (gameState.phase === "combat_end") {
+      const timeout = setTimeout(() => {
+        advancePhase()
+      }, 500)
+      return () => clearTimeout(timeout)
+    }
+  }, [gameState?.phase, gameState?.activePlayer, advancePhase])
 
   // Advanced AI logic
   useEffect(() => {
@@ -818,20 +837,30 @@ export function GameBoard() {
     }
   }, [gameState, addLog, passTurn, advancePhase])
 
-  // AI blocking logic
   // AI blocking logic - when player attacks, AI blocks
   useEffect(() => {
     if (!gameState || gameState.activePlayer !== "player" || gameState.phase !== "combat_blockers") return
     
     // Check if player has attacking creatures
     const attackingCreatures = gameState.player.attackingCreatures
-    if (attackingCreatures.length === 0) return
+    if (attackingCreatures.length === 0) {
+      // No attackers, auto-advance through combat phases
+      const timeout = setTimeout(() => {
+        advancePhase()
+      }, 500)
+      return () => clearTimeout(timeout)
+    }
 
     const attackerCards = gameState.player.zones.battlefield.filter((c) =>
       attackingCreatures.some((a) => a.cardId === c.id)
     )
 
-    if (attackerCards.length === 0) return
+    if (attackerCards.length === 0) {
+      const timeout = setTimeout(() => {
+        advancePhase()
+      }, 500)
+      return () => clearTimeout(timeout)
+    }
 
     setAiThinking(true)
     const timeout = setTimeout(() => {
@@ -863,11 +892,15 @@ export function GameBoard() {
         return { ...prev, opponent: newOpponent }
       })
 
-      setAiThinking(false)
+      // Auto-advance to combat damage after AI blocks
+      setTimeout(() => {
+        advancePhase()
+        setAiThinking(false)
+      }, 500)
     }, 1000)
 
     return () => clearTimeout(timeout)
-  }, [gameState, addLog])
+  }, [gameState, addLog, advancePhase])
 
   // Dice roller
   const rollDice = (sides: number = 20) => {
