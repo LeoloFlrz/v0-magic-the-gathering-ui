@@ -626,3 +626,21 @@ export function getCardTextColorClass(card: Card): string {
     default: return "text-gray-200"
   }
 }
+
+// Perform mulligan - return hand to library, shuffle, draw new hand (one less card)
+export function performMulligan(player: Player, mulliganCount: number): Player {
+  const cardsToDraw = Math.max(1, 7 - mulliganCount)
+  const allCards = [...player.zones.library, ...player.zones.hand]
+  const shuffledLibrary = shuffleArray(allCards)
+  const newHand = shuffledLibrary.slice(0, cardsToDraw)
+  const newLibrary = shuffledLibrary.slice(cardsToDraw)
+  
+  return {
+    ...player,
+    zones: {
+      ...player.zones,
+      hand: newHand,
+      library: newLibrary,
+    },
+  }
+}

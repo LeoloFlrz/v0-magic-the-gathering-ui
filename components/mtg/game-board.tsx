@@ -10,6 +10,8 @@ import {
   ChevronRight,
   Target,
   Sparkles,
+  RefreshCw,
+  Check,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -47,6 +49,7 @@ import {
   tapLandForMana,
   canPlayCard,
   spendManaForCard,
+  performMulligan,
 } from "@/lib/mtg/game-utils"
 import {
   makeMainPhaseDecision,
@@ -75,6 +78,11 @@ export function GameBoard() {
   const [selectedAttackers, setSelectedAttackers] = useState<string[]>([])
   const [selectedBlockers, setSelectedBlockers] = useState<{ blockerId: string; attackerId: string }[]>([])
   const [pendingBlocker, setPendingBlocker] = useState<string | null>(null)
+  const [mulliganPhase, setMulliganPhase] = useState(true)
+  const [mulliganCount, setMulliganCount] = useState(0)
+  const [mulliganAnimating, setMulliganAnimating] = useState(false)
+  const [cardsReturning, setCardsReturning] = useState<string[]>([])
+  const [cardsDrawing, setCardsDrawing] = useState<string[]>([])
 
   const handleStartGame = (config: GameConfig) => {
     setGameConfig(config)
@@ -925,11 +933,238 @@ export function GameBoard() {
     setSelectedCard(null)
     setDiceResult(null)
     setCounterTargetMode(false)
+    setMulliganPhase(true)
+    setMulliganCount(0)
+    setMulliganAnimating(false)
+    setCardsReturning([])
+    setCardsDrawing([])
   }
+
+  // Handle mulligan
+  const handleMulligan = useCallback(() => {
+    if (!gameState || mulliganAnimating) return
+    
+    const newMulliganCount = mulliganCount + 1
+    const currentHandIds = gameState.player.zones.hand.map(c => c.id)
+    setCardsReturning(currentHandIds)
+    setMulliganAnimating(true)
+    
+    setTimeout(() => {
+      setCardsReturning([])
+      
+      setGameState((prev) => {
+        if (!prev) return prev
+        const newPlayer = performMulligan(prev.player, newMulliganCount)
+        return { ...prev, player: newPlayer }
+      })
+      
+      setTimeout(() => {
+        setGameState((prev) => {
+          if (!prev) return prev
+          const cardsToDraw = Math.max(1, 7 - newMulliganCount)
+          const newHandIds = prev.player.zones.hand.slice(0, cardsToDraw).map(c => c.id)
+          setCardsDrawing(newHandIds)
+          return prev
+        })
+        
+        setTimeout(() => {
+          setCardsDrawing([])
+          setMulliganAnimating(false)
+          setMulliganCount(newMulliganCount)
+        }, 800)
+      }, 500)
+    }, 700)
+  }, [gameState, mulliganCount, mulliganAnimating])
+
+  // Keep hand (end mulligan phase)
+  const handleKeepHand = useCallback(() => {
+    setMulliganPhase(false)
+    addLog(`Mano inicial con ${gameState?.player.zones.hand.length || 7} cartas`)
+  }, [gameState, addLog])
 
   // Show lobby if game hasn't started
   if (!gameStarted || !gameState) {
     return <GameLobby onStartGame={handleStartGame} />
+  }
+
+  // Show mulligan phase
+  if (mulliganPhase) {
+    return (
+      <div className="flex h-screen flex-col bg-background">
+        {/* Header */}
+        <header className="shrink-0 border-b border-border bg-card px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
+                <span className="text-lg font-bold text-primary-foreground">M</span>
+              </div>
+              <div>
+                <h1 className="text-lg font-semibold text-foreground">Fase de Mulligan</h1>
+                <p className="text-sm text-muted-foreground">
+                  {mulliganCount === 0 
+                    ? "Mano inicial de 7 cartas" 
+                    : `Mulligan ${mulliganCount} - ${7 - mulliganCount} cartas`}
+                </p>
+              </div>
+            </div>
+            
+            {/* Action Buttons */}
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                size="default"
+                onClick={handleMulligan}
+                disabled={mulliganAnimating || mulliganCount >= 6}
+                className="gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${mulliganAnimating ? "animate-spin" : ""}`} />
+                {mulliganCount >= 6 ? "Máximo" : `Mulligan (${7 - mulliganCount - 1})`}
+              </Button>
+              <Button
+                variant="default"
+                size="default"
+                onClick={handleKeepHand}
+                disabled={mulliganAnimating}
+                className="gap-2"
+              >
+                <Check className="h-4 w-4" />
+                Quedarse ({gameState.player.zones.hand.length})
+              </Button>
+            </div>
+          </div>
+        </header>
+
+        {/* Mulligan Game Area */}
+        <main className="flex flex-1 flex-col p-4 relative overflow-hidden">
+          {/* Library zone */}
+          <div className="flex justify-center mb-4">
+            <div className="flex flex-col items-center gap-1 rounded-lg border border-border/50 bg-secondary/30 p-3">
+              <span className="text-xs font-medium text-muted-foreground">
+                Biblioteca ({gameState.player.zones.library.length})
+              </span>
+              <div className="relative h-24 w-16">
+                {gameState.player.zones.library.length > 0 && (
+                  <>
+                    <div className="absolute inset-0 translate-x-1 translate-y-1 rounded-lg border-2 border-purple-900 bg-gradient-to-br from-purple-800 to-purple-900" />
+                    <div className="absolute inset-0 translate-x-0.5 translate-y-0.5 rounded-lg border-2 border-purple-900 bg-gradient-to-br from-purple-800 to-purple-900" />
+                    <div className="absolute inset-0 rounded-lg border-2 border-purple-900 bg-gradient-to-br from-purple-800 to-purple-900 flex items-center justify-center">
+                      <span className="text-lg font-bold text-purple-300">{gameState.player.zones.library.length}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Animated cards traveling */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            {/* Cards going TO library */}
+            {cardsReturning.map((cardId, index) => {
+              const handSize = cardsReturning.length
+              // Calculate card's starting position (center of screen, spread horizontally)
+              const cardSpacing = Math.min(100, 600 / handSize)
+              const startX = (index - (handSize - 1) / 2) * cardSpacing
+              // Library is at top center - calculate relative movement
+              const targetX = -startX // Move toward center
+              const targetY = -350 // Move up to library
+              
+              return (
+                <div
+                  key={cardId}
+                  className="absolute animate-card-to-library"
+                  style={{
+                    left: `calc(50% + ${startX}px)`,
+                    top: '55%',
+                    '--target-x': `${targetX}px`,
+                    '--target-y': `${targetY}px`,
+                    animationDelay: `${index * 50}ms`,
+                    zIndex: 100 + index,
+                  } as React.CSSProperties}
+                >
+                  <div className="h-52 w-36 rounded-lg border-2 border-purple-900 bg-gradient-to-br from-purple-800 to-purple-900 shadow-2xl -translate-x-1/2 -translate-y-1/2" />
+                </div>
+              )
+            })}
+            
+            {/* Cards coming FROM library */}
+            {cardsDrawing.map((cardId, index) => {
+              const handSize = cardsDrawing.length
+              // Calculate card's target position in hand
+              const cardSpacing = Math.min(100, 600 / handSize)
+              const targetX = (index - (handSize - 1) / 2) * cardSpacing
+              const targetY = 300 // Move down to hand area
+              
+              return (
+                <div
+                  key={cardId}
+                  className="absolute animate-card-from-library"
+                  style={{
+                    left: '50%',
+                    top: '120px',
+                    '--target-x': `${targetX}px`,
+                    '--target-y': `${targetY}px`,
+                    animationDelay: `${index * 80}ms`,
+                    zIndex: 100 + index,
+                  } as React.CSSProperties}
+                >
+                  <div className="h-52 w-36 rounded-lg border-2 border-purple-900 bg-gradient-to-br from-purple-800 to-purple-900 shadow-2xl -translate-x-1/2 -translate-y-1/2" />
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Hand Display */}
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex flex-wrap justify-center gap-3 p-4 rounded-xl border-2 border-primary/30 bg-primary/5">
+              {!mulliganAnimating && gameState.player.zones.hand.map((card, index) => (
+                <div
+                  key={card.id}
+                  className="relative transition-all duration-300 hover:scale-105 hover:-translate-y-2"
+                >
+                  {card.imageUrl ? (
+                    <img
+                      src={card.imageUrl}
+                      alt={card.name}
+                      className="h-52 w-auto rounded-lg shadow-lg"
+                    />
+                  ) : (
+                    <div className="h-52 w-36 rounded-lg bg-gradient-to-br from-gray-700 to-gray-800 p-3 flex flex-col justify-between shadow-lg border border-gray-600">
+                      <div>
+                        <span className="text-sm font-semibold text-white block">{card.name}</span>
+                        <span className="text-xs text-gray-400">{card.manaCost}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-gray-400">{card.type}</span>
+                        {card.power !== undefined && (
+                          <span className="text-xs text-white block">{card.power}/{card.toughness}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              
+              {mulliganAnimating && (
+                <div className="flex items-center justify-center h-52 w-full">
+                  <div className="text-center">
+                    <RefreshCw className="h-8 w-8 animate-spin text-primary mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">Barajando...</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Info Footer */}
+          <div className="text-center py-2">
+            <p className="text-sm text-muted-foreground">
+              Puedes hacer mulligan para barajar tu mano y robar una carta menos.
+              {mulliganCount > 0 && " Después de quedarte, podrás hacer Scry 1."}
+            </p>
+          </div>
+        </main>
+      </div>
+    )
   }
 
   return (
