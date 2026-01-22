@@ -32,6 +32,63 @@ const sizeClasses = {
   lg: "w-32 h-44 text-xs",
 }
 
+// Componente para renderizar símbolos de mana
+function ManaSymbol({ symbol }: { symbol: string }) {
+  const manaColorMap: Record<string, { bg: string; text: string; label: string }> = {
+    "W": { bg: "bg-yellow-300", text: "text-yellow-800", label: "W" },
+    "U": { bg: "bg-blue-400", text: "text-blue-900", label: "U" },
+    "B": { bg: "bg-gray-800", text: "text-gray-300", label: "B" },
+    "R": { bg: "bg-red-500", text: "text-red-900", label: "R" },
+    "G": { bg: "bg-green-500", text: "text-green-900", label: "G" },
+    "C": { bg: "bg-gray-400", text: "text-gray-700", label: "C" },
+  }
+
+  if (manaColorMap[symbol]) {
+    const { bg, text, label } = manaColorMap[symbol]
+    return (
+      <div className={cn(
+        "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold border border-black/20",
+        bg,
+        text
+      )}>
+        {label}
+      </div>
+    )
+  }
+
+  // Para números (mana genérico)
+  if (!isNaN(Number(symbol))) {
+    return (
+      <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold bg-gray-600 text-white border border-gray-700">
+        {symbol}
+      </div>
+    )
+  }
+
+  return null
+}
+
+// Parsear manaCost y devolver array de símbolos
+function parseManaCost(manaCost: string): string[] {
+  const symbols: string[] = []
+  let i = 0
+  while (i < manaCost.length) {
+    if (manaCost[i] === "{") {
+      const closeIdx = manaCost.indexOf("}", i)
+      if (closeIdx !== -1) {
+        const symbol = manaCost.substring(i + 1, closeIdx)
+        symbols.push(symbol)
+        i = closeIdx + 1
+      } else {
+        i++
+      }
+    } else {
+      i++
+    }
+  }
+  return symbols
+}
+
 export function CardComponent({
   card,
   size = "md",
@@ -191,9 +248,11 @@ export function CardComponent({
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <h3 className="font-bold text-base leading-tight">{card.name}</h3>
                     {card.manaCost && (
-                      <span className="font-mono text-sm bg-muted px-2 py-1 rounded whitespace-nowrap">
-                        {card.manaCost}
-                      </span>
+                      <div className="flex gap-1">
+                        {parseManaCost(card.manaCost).map((symbol, idx) => (
+                          <ManaSymbol key={idx} symbol={symbol} />
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
