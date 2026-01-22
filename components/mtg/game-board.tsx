@@ -371,11 +371,11 @@ export function GameBoard() {
     })
   }, [addLog])
 
-  // Auto-advance player's turn through initial phases
+  // Auto-advance through initial phases (untap, upkeep, draw) for both players
   useEffect(() => {
-    if (!gameState || gameState.activePlayer !== "player") return
+    if (!gameState) return
     
-    // Auto-advance from untap, upkeep, and draw to reach main1
+    // Only auto-advance from untap, upkeep, and draw phases
     if (gameState.phase !== "untap" && gameState.phase !== "upkeep" && gameState.phase !== "draw") return
     
     const timeout = setTimeout(() => {
@@ -401,7 +401,7 @@ export function GameBoard() {
         }
 
         if (nextPhase === "draw" && prev.phase === "upkeep") {
-          // Draw phase - draw card for active player
+          // Draw phase - draw card for active player (both player and AI)
           if (newState.activePlayer === "player") {
             const { player: updatedPlayer, drawnCard } = drawCard(newState.player)
             if (drawnCard) {
@@ -430,7 +430,7 @@ export function GameBoard() {
     }, 500)
     
     return () => clearTimeout(timeout)
-  }, [gameState?.phase, gameState?.activePlayer])
+  }, [gameState?.phase])
 
   // Advanced AI logic
   useEffect(() => {
