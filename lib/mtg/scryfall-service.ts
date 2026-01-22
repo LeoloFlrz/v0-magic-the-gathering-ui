@@ -107,6 +107,9 @@ function parseScryfallCard(scryfallCard: ScryfallCard): Card {
   // Obtener imagen
   const imageUrl = scryfallCard.image_uris?.normal
 
+  // Detectar si es legendaria (potencial comandante)
+  const isLegendary = typeLine.includes("Legendary")
+
   const card: Card = {
     id: scryfallCard.id,
     name: scryfallCard.name,
@@ -119,6 +122,7 @@ function parseScryfallCard(scryfallCard: ScryfallCard): Card {
     toughness,
     colors: colors as any,
     imageUrl,
+    isLegendary, // Marcar si es legendaria
   }
 
   return card

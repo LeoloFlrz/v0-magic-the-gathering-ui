@@ -22,6 +22,7 @@ export interface Card {
   colors: ManaColor[]
   imageUrl?: string
   isCommander?: boolean
+  isLegendary?: boolean
   isTapped?: boolean
   counters?: number
   negativeCounters?: number // -1/-1 counters

@@ -17,7 +17,7 @@ export interface DeckFormat {
  * etc.
  */
 export function parseDeckText(deckText: string): DeckFormat {
-  const lines = deckText.split("\n").filter(line => line.trim())
+  const lines = deckText.split("\n")
   const mainboard: Array<{ quantity: number; cardName: string }> = []
   const sideboard: Array<{ quantity: number; cardName: string }> = []
   let isInSideboard = false
@@ -35,22 +35,22 @@ export function parseDeckText(deckText: string): DeckFormat {
 
     // Parsear línea: "1 Card Name" o "4 Card Name (SET) 123"
     const match = trimmed.match(/^(\d+)\s+(.+?)(?:\s+\(|$)/)
-    if (!match) continue
+    
+    if (!match) {
+      // Si no coincide con el patrón "cantidad + nombre", podría ser el comandante sin cantidad
+      // o un nombre separado en su propia línea
+      if (!isInSideboard && !commander && trimmed.length > 0) {
+        // Extraer solo el nombre sin el código del set (si está entre paréntesis)
+        const cleanName = trimmed.replace(/\s*\([^)]*\)\s*/g, "").trim()
+        if (cleanName.length > 0) {
+          commander = cleanName
+        }
+      }
+      continue
+    }
 
     const quantity = parseInt(match[1])
     let cardName = match[2].trim()
-
-    // La primera criatura podría ser el comandante
-    if (
-      mainboard.length === 0 &&
-      !isInSideboard &&
-      (cardName.includes("Hapatra") ||
-        cardName.includes("Edgar") ||
-        cardName.includes("Krenko") ||
-        cardName.includes("Talrand"))
-    ) {
-      commander = cardName
-    }
 
     if (isInSideboard) {
       sideboard.push({ quantity, cardName })
@@ -70,27 +70,95 @@ export function parseDeckText(deckText: string): DeckFormat {
 /**
  * Convierte un DeckFormat a un array de cartas de juego
  */
-export async function deckFormatToCards(deckFormat: DeckFormat): Promise<Card[]> {
+export async function deckFormatToCards(
+  deckFormat: DeckFormat,
+  selectedCommanderName?: string
+): Promise<Card[]> {
   const cards: Card[] = []
   const allCardLines = [...deckFormat.mainboard]
+
+  // Primera pasada: cargar todas las cartas e identificar legendarias
+  const cardDataWithLegendary: Array<{
+    quantity: number
+    cardName: string
+    card: Card | null
+    isLegendary: boolean
+  }> = []
 
   for (const { quantity, cardName } of allCardLines) {
     try {
       const card = await getCardByName(cardName)
       if (card) {
-        for (let i = 0; i < quantity; i++) {
-          cards.push({
-            ...card,
-            id: `${card.id}-${i}`, // Hacer ID único para cada copia
-          })
-        }
+        cardDataWithLegendary.push({
+          quantity,
+          cardName,
+          card,
+          isLegendary: card.isLegendary || false,
+        })
       }
     } catch (error) {
       console.error(`Error loading card: ${cardName}`)
     }
   }
 
+  // Encontrar el índice del comandante
+  let commanderIndex = -1
+  
+  if (selectedCommanderName) {
+    // Si el usuario seleccionó un comandante específico, usarlo
+    commanderIndex = cardDataWithLegendary.findIndex(
+      (card) => card.cardName === selectedCommanderName
+    )
+  } else {
+    // Si no, buscar la última legendaria con cantidad 1
+    for (let i = cardDataWithLegendary.length - 1; i >= 0; i--) {
+      if (cardDataWithLegendary[i].isLegendary && cardDataWithLegendary[i].quantity === 1) {
+        commanderIndex = i
+        break
+      }
+    }
+  }
+
+  // Segunda pasada: agregar las cartas y marcar el comandante
+  for (let idx = 0; idx < cardDataWithLegendary.length; idx++) {
+    const { quantity, card, cardName } = cardDataWithLegendary[idx]
+    
+    for (let i = 0; i < quantity; i++) {
+      const cardCopy = {
+        ...card!,
+        id: `${card!.id}-${i}`,
+      }
+      
+      // Marcar solo la primera copia del comandante detectado
+      if (idx === commanderIndex && i === 0) {
+        cardCopy.isCommander = true
+      }
+      
+      cards.push(cardCopy)
+    }
+  }
+
   return cards
+}
+
+/**
+ * Obtiene todas las legendarias de un deck
+ */
+export async function getLegendariesFromDeck(deckFormat: DeckFormat): Promise<string[]> {
+  const legendaries: string[] = []
+
+  for (const { cardName } of deckFormat.mainboard) {
+    try {
+      const card = await getCardByName(cardName)
+      if (card && card.isLegendary) {
+        legendaries.push(cardName)
+      }
+    } catch (error) {
+      console.error(`Error loading card: ${cardName}`)
+    }
+  }
+
+  return legendaries
 }
 
 /**

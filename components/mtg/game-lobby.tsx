@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select"
 import { Users, Heart, Sparkles, Skull, Swords, Upload, Loader2, Trash2, Save } from "lucide-react"
 import type { GameConfig, Card } from "@/lib/mtg/types"
-import { parseDeckText, deckFormatToCards, PRESET_DECKS } from "@/lib/mtg/deck-service"
+import { parseDeckText, deckFormatToCards, getLegendariesFromDeck, PRESET_DECKS } from "@/lib/mtg/deck-service"
 import { blightCurseDeck } from "@/lib/mtg/sample-deck"
 import { getSavedDecks, saveDeck, deleteDeck, type SavedDeck } from "@/lib/mtg/deck-storage"
 
@@ -34,6 +34,10 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
   const [savedDecks, setSavedDecks] = useState<SavedDeck[]>([])
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [newDeckName, setNewDeckName] = useState("")
+  const [showCommanderDialog, setShowCommanderDialog] = useState(false)
+  const [pendingDeckFormat, setPendingDeckFormat] = useState<any>(null)
+  const [legendaries, setLegendaries] = useState<string[]>([])
+  const [selectedCommander, setSelectedCommander] = useState<string>("")
 
   // Cargar decks guardados al montar el componente
   useEffect(() => {
@@ -50,15 +54,47 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
     setIsLoadingDeck(true)
     try {
       const deckFormat = parseDeckText(deckText)
-      const cards = await deckFormatToCards(deckFormat)
       
+      // Buscar legendarias en el deck
+      const foundLegendaries = await getLegendariesFromDeck(deckFormat)
+      
+      if (foundLegendaries.length > 0) {
+        // Si hay legendarias, mostrar diálogo para seleccionar el comandante
+        setPendingDeckFormat(deckFormat)
+        setLegendaries(foundLegendaries)
+        setSelectedCommander(foundLegendaries[foundLegendaries.length - 1]) // Preseleccionar la última
+        setShowCommanderDialog(true)
+        setDeckText("") // Limpiar textarea
+      } else {
+        // Si no hay legendarias, cargar normalmente
+        const cards = await deckFormatToCards(deckFormat)
+        if (cards.length > 0) {
+          setPlayerDeck(cards)
+          setPlayerDeckName(deckFormat.name)
+          setShowSaveDialog(true)
+        } else {
+          alert("No se pudieron cargar las cartas del mazo. Verifica los nombres.")
+        }
+      }
+    } catch (error) {
+      console.error("Error loading deck:", error)
+      alert("Error al cargar el mazo")
+    } finally {
+      setIsLoadingDeck(false)
+    }
+  }
+
+  const handleCommanderSelected = async () => {
+    if (!pendingDeckFormat || !selectedCommander) return
+
+    setIsLoadingDeck(true)
+    try {
+      const cards = await deckFormatToCards(pendingDeckFormat, selectedCommander)
       if (cards.length > 0) {
         setPlayerDeck(cards)
-        setPlayerDeckName(deckFormat.name)
-        setDeckText("") // Limpiar textarea
-        setShowSaveDialog(true) // Mostrar opción de guardar
-      } else {
-        alert("No se pudieron cargar las cartas del mazo. Verifica los nombres.")
+        setPlayerDeckName(pendingDeckFormat.name)
+        setShowCommanderDialog(false)
+        setShowSaveDialog(true)
       }
     } catch (error) {
       console.error("Error loading deck:", error)
@@ -167,6 +203,62 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
                 </Button>
               </div>
             </div>
+
+            {/* Commander Selection Dialog */}
+            {showCommanderDialog && legendaries.length > 0 && (
+              <div className="rounded-lg border border-primary bg-primary/10 p-4 space-y-3">
+                <div>
+                  <Label className="text-sm font-semibold">
+                    Se encontraron cartas legendarias. ¿Cuál es tu comandante?
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Se detectaron {legendaries.length} legendaria(s) en el mazo
+                  </p>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {legendaries.map((legendary) => (
+                    <button
+                      key={legendary}
+                      onClick={() => setSelectedCommander(legendary)}
+                      className={`w-full text-left rounded-lg border-2 p-3 transition-all ${
+                        selectedCommander === legendary
+                          ? "border-primary bg-primary/20"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <p className="font-medium text-sm">{legendary}</p>
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={handleCommanderSelected}
+                    disabled={!selectedCommander || isLoadingDeck}
+                  >
+                    {isLoadingDeck ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Cargando...
+                      </>
+                    ) : (
+                      "Confirmar"
+                    )}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setShowCommanderDialog(false)
+                      setLegendaries([])
+                      setPendingDeckFormat(null)
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* Save Dialog */}
             {showSaveDialog && (
