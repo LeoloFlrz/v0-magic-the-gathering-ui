@@ -70,7 +70,10 @@ export function createInitialGameState(config?: GameConfig): GameState {
   const startingLife = config?.startingLife || 40
   const playerName = config?.playerName || "Jugador"
   
-  const player = initializePlayer("player", `${playerName} (Blight Curse)`, blightCurseDeck, startingLife)
+  // Usar el deck del config si existe, sino usar el deck por defecto
+  const playerDeck = config?.playerDeck || blightCurseDeck
+  
+  const player = initializePlayer("player", playerName, playerDeck, startingLife)
   const opponent = initializePlayer("opponent", "IA Goblin", aiOpponentDeck, startingLife)
 
   // Draw initial hands (7 cards)

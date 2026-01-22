@@ -29,14 +29,16 @@ export interface Card {
   isAnimating?: boolean
 }
 
-export type AIDeckType = "krenko_goblins" | "talrand_control" | "omnath_landfall" | "edgar_vampires"
+export type AIDeckType = "krenko_goblins" | "talrand_control" | "omnath_landfall" | "edgar_vampires" | "hapatra_counters"
 
 export interface GameConfig {
   playerCount: 2 | 3 | 4
   startingLife: 20 | 30 | 40
   playerName: string
-  deckType: "blight_curse"
-  aiDeckType: AIDeckType
+  playerDeck?: Card[] // Deck del jugador (si no se especifica, usa deck por defecto)
+  aiDeck?: Card[] // Deck de la IA (si no se especifica, usa deck por defecto)
+  deckType?: "blight_curse"
+  aiDeckType?: AIDeckType
 }
 
 export interface AttackingCreature {
