@@ -25,6 +25,7 @@ interface ZoneProps {
   onCardDragStart?: (e: React.DragEvent, card: Card) => void
   onCardDragEnd?: (e: React.DragEvent) => void
   drawingCardId?: string | null
+  canPlayCard?: (card: Card) => boolean
 }
 
 export function Zone({
@@ -46,6 +47,7 @@ export function Zone({
   onCardDragStart,
   onCardDragEnd,
   drawingCardId,
+  canPlayCard,
 }: ZoneProps) {
   const [isDragOver, setIsDragOver] = useState(false)
   const isEmpty = cards.length === 0
@@ -155,6 +157,7 @@ export function Zone({
                 onDragStart={onCardDragStart}
                 onDragEnd={onCardDragEnd}
                 isDrawing={drawingCardId === card.id}
+                canPlay={canPlayCard?.(card)}
               />
             ))}
           </div>
@@ -175,6 +178,7 @@ export function Zone({
               onDragStart={onCardDragStart}
               onDragEnd={onCardDragEnd}
               isDrawing={drawingCardId === card.id}
+              canPlay={canPlayCard?.(card)}
             />
           ))}
         </div>

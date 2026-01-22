@@ -24,6 +24,7 @@ interface CardComponentProps {
   onDragStart?: (e: React.DragEvent, card: Card) => void
   onDragEnd?: (e: React.DragEvent) => void
   isDrawing?: boolean
+  canPlay?: boolean
 }
 
 const sizeClasses = {
@@ -102,6 +103,7 @@ export function CardComponent({
   onDragStart,
   onDragEnd,
   isDrawing = false,
+  canPlay = false,
 }: CardComponentProps) {
   const [isDragging, setIsDragging] = useState(false)
   const colorClass = getCardColorClass(card)
@@ -139,6 +141,7 @@ export function CardComponent({
           : "border-black/30",
         card.isTapped && "rotate-90",
         selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+        canPlay && !faceDown && !card.isTapped && "ring-2 ring-green-500 ring-offset-1 shadow-green-500/50 shadow-lg animate-pulse",
         isDragging && "scale-105 opacity-50",
         !isDragging && "hover:scale-110 hover:shadow-xl",
         isDrawing && "animate-draw-card",

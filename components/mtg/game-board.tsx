@@ -44,6 +44,9 @@ import {
   getNextPhase,
   PHASE_ORDER,
   addNegativeCounter,
+  tapLandForMana,
+  canPlayCard,
+  spendManaForCard,
 } from "@/lib/mtg/game-utils"
 import {
   makeMainPhaseDecision,
@@ -132,6 +135,12 @@ export function GameBoard() {
           return
         }
 
+        // Check if has enough mana
+        if (!canPlayCard(gameState.player, card)) {
+          addLog(`No tienes suficiente mana para jugar ${card.name}`)
+          return
+        }
+
         setGameState((prev) => {
           if (!prev) return prev
           return {
@@ -159,6 +168,12 @@ export function GameBoard() {
       // Check if trying to play a land and already played one this turn
       if (card.type === "land" && gameState.player.hasPlayedLandThisTurn) {
         addLog("Ya has jugado una tierra este turno")
+        return
+      }
+
+      // Check if has enough mana
+      if (!canPlayCard(gameState.player, card)) {
+        addLog(`No tienes suficiente mana para jugar ${card.name}`)
         return
       }
 
@@ -191,6 +206,18 @@ export function GameBoard() {
               player: tapCard(prev.player, card.id),
             }
           })
+          break
+        case "tap_land_for_mana":
+          if (card.type === "land") {
+            setGameState((prev) => {
+              if (!prev) return prev
+              return {
+                ...prev,
+                player: tapLandForMana(prev.player, card.id),
+              }
+            })
+            addLog(`Giras ${card.name} para generar mana`)
+          }
           break
         case "to_graveyard":
           setGameState((prev) => {
@@ -266,14 +293,23 @@ export function GameBoard() {
       gameState.player.zones.commandZone.length > 0 &&
       (gameState.phase === "main1" || gameState.phase === "main2")
     ) {
+      const commander = gameState.player.zones.commandZone[0]
+      
+      // Check if has enough mana to cast commander
+      if (!canPlayCard(gameState.player, commander)) {
+        addLog(`No tienes suficiente mana para invocar a ${commander.name}`)
+        return
+      }
+
       setGameState((prev) => {
         if (!prev) return prev
+        const updatedPlayer = spendManaForCard(prev.player, commander)
         return {
           ...prev,
-          player: castCommander(prev.player),
+          player: castCommander(updatedPlayer),
         }
       })
-      addLog(`Lanzas a tu comandante ${gameState.player.zones.commandZone[0]?.name}`)
+      addLog(`Lanzas a tu comandante ${commander.name}`)
     }
   }, [gameState, addLog])
 
@@ -773,6 +809,7 @@ export function GameBoard() {
                 selectedCardId={selectedCard?.card.id}
                 className="h-full"
                 drawingCardId={drawingCardId}
+                canPlayCard={(card) => canPlayCard(gameState.player, card)}
               />
             </div>
           </ContextMenuTrigger>
@@ -785,6 +822,18 @@ export function GameBoard() {
               >
                 {selectedCard.card.isTapped ? "Enderezar" : "Girar"}
               </ContextMenuItem>
+              {selectedCard.card.type === "land" && !selectedCard.card.isTapped && (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    onClick={() =>
+                      handleCardAction(selectedCard.card, selectedCard.zone, "tap_land_for_mana")
+                    }
+                  >
+                    Girar por mana
+                  </ContextMenuItem>
+                </>
+              )}
               <ContextMenuSeparator />
               <ContextMenuItem
                 onClick={() =>

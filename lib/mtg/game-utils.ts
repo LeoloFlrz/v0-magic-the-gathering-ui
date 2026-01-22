@@ -129,6 +129,186 @@ export function removeNegativeCounter(player: Player, cardId: string): Player {
   }
 }
 
+// Parsear manaCost de formato {X}{Y}{Z} a dos valores:
+// 1) conteos por color específico (W,U,B,R,G,C) y 2) coste genérico total (números)
+function parseManaCost(manaCost: string): {
+  colored: { [key in keyof Player["mana"]]?: number }
+  generic: number
+} {
+  const colored: { [key in keyof Player["mana"]]?: number } = {}
+  let generic = 0
+
+  let i = 0
+  while (i < manaCost.length) {
+    if (manaCost[i] === "{") {
+      const closeIdx = manaCost.indexOf("}", i)
+      if (closeIdx !== -1) {
+        const symbol = manaCost.substring(i + 1, closeIdx)
+        // Símbolos de color específicos
+        if (["W", "U", "B", "R", "G", "C"].includes(symbol)) {
+          const key = symbol as keyof Player["mana"]
+          colored[key] = (colored[key] || 0) + 1
+        } else if (!isNaN(Number(symbol))) {
+          // Símbolos numéricos representan coste genérico
+          generic += Number(symbol)
+        } else {
+          // Otros símbolos (híbridos, X, etc.) se ignoran por simplicidad por ahora
+          // y no bloquean el juego en este modelo simplificado
+        }
+        i = closeIdx + 1
+      } else {
+        i++
+      }
+    } else {
+      i++
+    }
+  }
+
+  return { colored, generic }
+}
+
+// Verificar si el jugador tiene suficiente mana para jugar una carta
+export function canPlayCard(player: Player, card: Card): boolean {
+  if (card.type === "land") {
+    // Las tierras no tienen coste de mana
+    return true
+  }
+
+  if (!card.manaCost || card.manaCost === "") {
+    return true
+  }
+
+  // Parsear coste requerido
+  const { colored: requiredColored, generic: requiredGeneric } = parseManaCost(card.manaCost)
+
+  // Construir mana potencial disponible: pool actual + tierras enderezadas que producen ese color
+  const available: { [key in keyof Player["mana"]]: number } = { ...player.mana }
+
+  // Contar tierras enderezadas por color
+  for (const land of player.zones.battlefield) {
+    if (land.type === "land" && !land.isTapped) {
+      const color = getLandManaColor(land.name)
+      available[color] = (available[color] || 0) + 1
+    }
+  }
+
+  // Satisfacer requisitos de colores específicos
+  if (requiredColored) {
+    for (const color of ["W", "U", "B", "R", "G", "C"] as Array<keyof Player["mana"]>) {
+      const need = requiredColored[color] || 0
+      if (need > 0) {
+        if ((available[color] || 0) < need) {
+          return false
+        }
+        // Reservar ese mana reduciéndolo del disponible
+        available[color] = (available[color] || 0) - need
+      }
+    }
+  }
+
+  // Calcular mana genérico restante disponible (cualquier color sirve)
+  const totalRemaining = (available.W || 0) + (available.U || 0) + (available.B || 0) + (available.R || 0) + (available.G || 0) + (available.C || 0)
+
+  return totalRemaining >= requiredGeneric
+}
+
+// Restar el mana de la carta del mana del jugador y tapear las tierras correspondientes
+export function spendManaForCard(player: Player, card: Card): Player {
+  if (card.type === "land" || !card.manaCost || card.manaCost === "") {
+    // Las tierras no consumen mana
+    return player
+  }
+
+  let p: Player = { ...player }
+  const { colored: requiredColored, generic: requiredGeneric } = parseManaCost(card.manaCost)
+
+  // Helper: tapear una tierra de un color y sumar 1 al pool
+  const tapOneLandOfColor = (pl: Player, color: keyof Player["mana"]): Player => {
+    const land = pl.zones.battlefield.find(
+      (c) => c.type === "land" && !c.isTapped && getLandManaColor(c.name) === color
+    )
+    if (!land) return pl
+    return {
+      ...pl,
+      mana: { ...pl.mana, [color]: pl.mana[color] + 1 },
+      zones: {
+        ...pl.zones,
+        battlefield: pl.zones.battlefield.map((c) =>
+          c.id === land.id ? { ...c, isTapped: true } : c
+        ),
+      },
+    }
+  }
+
+  // 1) Pagar colores específicos: garantizar pool suficiente auto-tapeando tierras del color
+  for (const color of ["W", "U", "B", "R", "G", "C"] as Array<keyof Player["mana"]>) {
+    const need = (requiredColored?.[color] || 0)
+    if (need > 0) {
+      // Auto-tap hasta alcanzar el pool requerido
+      while (p.mana[color] < need) {
+        const before = p
+        p = tapOneLandOfColor(p, color)
+        if (before === p) break // no había tierras disponibles
+      }
+      // Reducir del pool
+      const canPay = Math.min(p.mana[color], need)
+      p = { ...p, mana: { ...p.mana, [color]: p.mana[color] - canPay } }
+    }
+  }
+
+  // 2) Pagar coste genérico usando cualquier color; auto-tap si falta pool
+  let remainingGeneric = requiredGeneric
+  const colorsOrder: Array<keyof Player["mana"]> = ["W", "U", "B", "R", "G", "C"]
+  const totalPool = () => colorsOrder.reduce((sum, c) => sum + p.mana[c], 0)
+
+  while (remainingGeneric > 0) {
+    if (totalPool() === 0) {
+      // Tapear cualquier tierra disponible para agregar mana al pool
+      const anyUntapped = p.zones.battlefield.find((c) => c.type === "land" && !c.isTapped)
+      if (!anyUntapped) break
+      const color = getLandManaColor(anyUntapped.name)
+      p = tapOneLandOfColor(p, color)
+    }
+
+    // Gastar 1 del color con mayor cantidad disponible
+    const richest = colorsOrder.sort((a, b) => p.mana[b] - p.mana[a])[0]
+    if (p.mana[richest] > 0) {
+      p = { ...p, mana: { ...p.mana, [richest]: p.mana[richest] - 1 } }
+      remainingGeneric--
+    } else {
+      // No queda pool a pesar de intentar tapear
+      break
+    }
+  }
+
+  return p
+}
+
+// Función auxiliar para obtener el color de mana de una tierra
+function getLandManaColor(landName: string): keyof Player["mana"] {
+  const manaMap: { [key: string]: keyof Player["mana"] } = {
+    "white": "W",
+    "blue": "U",
+    "black": "B",
+    "red": "R",
+    "green": "G",
+    "island": "U",
+    "mountain": "R",
+    "forest": "G",
+    "swamp": "B",
+    "plains": "W",
+  }
+
+  const landNameLower = landName.toLowerCase()
+  for (const [landType, color] of Object.entries(manaMap)) {
+    if (landNameLower.includes(landType)) {
+      return color
+    }
+  }
+  
+  return "C"
+}
+
 export function drawCard(player: Player): { player: Player; drawnCard: Card | null } {
   if (player.zones.library.length === 0) {
     return { player, drawnCard: null }
@@ -153,6 +333,12 @@ export function playCard(player: Player, cardId: string): Player {
   if (cardIndex === -1) return player
 
   const card = player.zones.hand[cardIndex]
+
+  // Verificar si hay suficiente mana (considerando tierras enderezadas)
+  if (!canPlayCard(player, card)) {
+    return player
+  }
+
   const newHand = [...player.zones.hand]
   newHand.splice(cardIndex, 1)
 
@@ -162,16 +348,22 @@ export function playCard(player: Player, cardId: string): Player {
   // Mark that a land has been played if this is a land
   const hasPlayedLand = card.type === "land" ? true : player.hasPlayedLandThisTurn
 
+  // Restar el mana (auto-tapea si hace falta y descuenta del pool)
+  const updatedPlayer = spendManaForCard(player, card)
+
+  // Conservar el estado de las tierras tapadas tras el pago
+  const battlefieldAfterPayment = updatedPlayer.zones.battlefield
+
   return {
-    ...player,
+    ...updatedPlayer,
     hasPlayedLandThisTurn: hasPlayedLand,
     zones: {
-      ...player.zones,
+      ...updatedPlayer.zones,
       hand: newHand,
       battlefield: isPermanent
-        ? [...player.zones.battlefield, { ...card, isTapped: card.type === "land" ? false : false }]
-        : player.zones.battlefield,
-      graveyard: isPermanent ? player.zones.graveyard : [...player.zones.graveyard, card],
+        ? [...battlefieldAfterPayment, { ...card, isTapped: false }]
+        : battlefieldAfterPayment,
+      graveyard: isPermanent ? updatedPlayer.zones.graveyard : [...updatedPlayer.zones.graveyard, card],
     },
   }
 }
@@ -188,11 +380,56 @@ export function tapCard(player: Player, cardId: string): Player {
   }
 }
 
+// Tapear una tierra para generar mana según su nombre
+export function tapLandForMana(player: Player, cardId: string): Player {
+  const land = player.zones.battlefield.find((c) => c.id === cardId && c.type === "land")
+  if (!land || land.isTapped) return player
+
+  // Generar mana según el tipo de tierra
+  const manaMap: { [key: string]: keyof typeof player.mana } = {
+    "white": "W",
+    "blue": "U",
+    "black": "B",
+    "red": "R",
+    "green": "G",
+    "island": "U",
+    "mountain": "R",
+    "forest": "G",
+    "swamp": "B",
+    "plains": "W",
+  }
+
+  let manaColor: keyof typeof player.mana = "C"
+  const landNameLower = land.name.toLowerCase()
+
+  for (const [landType, color] of Object.entries(manaMap)) {
+    if (landNameLower.includes(landType)) {
+      manaColor = color
+      break
+    }
+  }
+
+  return {
+    ...player,
+    mana: {
+      ...player.mana,
+      [manaColor]: player.mana[manaColor] + 1,
+    },
+    zones: {
+      ...player.zones,
+      battlefield: player.zones.battlefield.map((c) =>
+        c.id === cardId ? { ...c, isTapped: true } : c
+      ),
+    },
+  }
+}
+
 export function untapAll(player: Player): Player {
   return {
     ...player,
     hasDrawnThisTurn: false,
     hasPlayedLandThisTurn: false,
+    mana: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }, // Reset mana pool
     zones: {
       ...player.zones,
       battlefield: player.zones.battlefield.map((c) => ({ ...c, isTapped: false })),

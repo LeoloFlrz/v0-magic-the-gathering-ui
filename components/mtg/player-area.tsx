@@ -27,6 +27,7 @@ interface PlayerAreaProps {
   selectedCardId?: string | null
   className?: string
   drawingCardId?: string | null
+  canPlayCard?: (card: Card) => boolean
 }
 
 export function PlayerArea({
@@ -42,6 +43,7 @@ export function PlayerArea({
   selectedCardId,
   className,
   drawingCardId,
+  canPlayCard,
 }: PlayerAreaProps) {
   const [draggedCard, setDraggedCard] = useState<Card | null>(null)
 
@@ -138,6 +140,44 @@ export function PlayerArea({
               </Button>
             )}
           </div>
+
+          {/* Mana Pool */}
+          {!isOpponent && (
+            <div className="flex items-center gap-1 rounded-lg bg-secondary/50 px-2 py-1">
+              {Object.entries(player.mana).map(([color, amount]) => {
+                const colorMap: { [key: string]: { bg: string; text: string } } = {
+                  "W": { bg: "bg-yellow-300", text: "text-yellow-800" },
+                  "U": { bg: "bg-blue-400", text: "text-blue-900" },
+                  "B": { bg: "bg-gray-800", text: "text-gray-300" },
+                  "R": { bg: "bg-red-500", text: "text-red-900" },
+                  "G": { bg: "bg-green-500", text: "text-green-900" },
+                  "C": { bg: "bg-gray-400", text: "text-gray-700" },
+                }
+                
+                const colorInfo = colorMap[color]
+                if (!colorInfo) return null
+                
+                return (
+                  <div key={color} className="flex items-center gap-0.5">
+                    {amount > 0 && (
+                      <div
+                        className={cn(
+                          "h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold border border-black/20",
+                          colorInfo.bg,
+                          colorInfo.text
+                        )}
+                      >
+                        {color}
+                      </div>
+                    )}
+                    {amount > 1 && (
+                      <span className="text-[10px] font-bold text-foreground">x{amount}</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -275,6 +315,7 @@ export function PlayerArea({
             onCardDragStart={handleCardDragStart}
             onCardDragEnd={handleCardDragEnd}
             drawingCardId={drawingCardId}
+            canPlayCard={canPlayCard}
           />
         )}
 
