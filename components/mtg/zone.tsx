@@ -198,6 +198,9 @@ interface BattlefieldProps {
   isOpponent?: boolean
   onCardDragStart?: (e: React.DragEvent, card: Card) => void
   onCardDragEnd?: (e: React.DragEvent) => void
+  attackingCreatureIds?: string[]
+  blockingCreatureIds?: string[]
+  selectedForCombatIds?: string[]
 }
 
 export function Battlefield({
@@ -210,6 +213,9 @@ export function Battlefield({
   isOpponent = false,
   onCardDragStart,
   onCardDragEnd,
+  attackingCreatureIds = [],
+  blockingCreatureIds = [],
+  selectedForCombatIds = [],
 }: BattlefieldProps) {
   const [isDragOverLands, setIsDragOverLands] = useState(false)
   const [isDragOverCreatures, setIsDragOverCreatures] = useState(false)
@@ -322,6 +328,9 @@ export function Battlefield({
                 draggable={!isOpponent}
                 onDragStart={onCardDragStart}
                 onDragEnd={onCardDragEnd}
+                isAttacking={attackingCreatureIds.includes(card.id)}
+                isBlocking={blockingCreatureIds.includes(card.id)}
+                isSelectedForCombat={selectedForCombatIds.includes(card.id)}
               />
             ))}
             {otherPermanents.map((card) => (

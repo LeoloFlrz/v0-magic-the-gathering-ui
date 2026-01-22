@@ -28,6 +28,9 @@ interface PlayerAreaProps {
   className?: string
   drawingCardId?: string | null
   canPlayCard?: (card: Card) => boolean
+  attackingCreatureIds?: string[]
+  blockingCreatureIds?: string[]
+  selectedForCombatIds?: string[]
 }
 
 export function PlayerArea({
@@ -44,6 +47,9 @@ export function PlayerArea({
   className,
   drawingCardId,
   canPlayCard,
+  attackingCreatureIds = [],
+  blockingCreatureIds = [],
+  selectedForCombatIds = [],
 }: PlayerAreaProps) {
   const [draggedCard, setDraggedCard] = useState<Card | null>(null)
 
@@ -299,6 +305,9 @@ export function PlayerArea({
           isOpponent={isOpponent}
           onCardDragStart={handleCardDragStart}
           onCardDragEnd={handleCardDragEnd}
+          attackingCreatureIds={attackingCreatureIds}
+          blockingCreatureIds={blockingCreatureIds}
+          selectedForCombatIds={selectedForCombatIds}
         />
 
         {/* Hand - only visible for player */}
