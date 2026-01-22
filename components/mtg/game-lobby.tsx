@@ -32,8 +32,8 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
   const [playerName, setPlayerName] = useState("Jugador")
   const [playerCount, setPlayerCount] = useState<2 | 3 | 4>(2)
   const [startingLife, setStartingLife] = useState<20 | 30 | 40>(40)
-  const [playerDeck, setPlayerDeck] = useState<Card[]>(blightCurseDeck)
-  const [playerDeckName, setPlayerDeckName] = useState("Blight Curse")
+  const [playerDeck, setPlayerDeck] = useState<Card[]>([])
+  const [playerDeckName, setPlayerDeckName] = useState("")
   const [deckText, setDeckText] = useState("")
   const [isLoadingDeck, setIsLoadingDeck] = useState(false)
   const [selectedAIDeckId, setSelectedAIDeckId] = useState<string>("")
@@ -165,6 +165,12 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
   }
 
   const handleStart = () => {
+    // Validar que se haya seleccionado un mazo
+    if (playerDeck.length === 0) {
+      alert("Por favor selecciona o carga un mazo antes de iniciar la partida")
+      return
+    }
+
     // Obtener el deck de la IA seleccionada
     const selectedAIDeckObj = savedDecks.find(deck => deck.id === selectedAIDeckId)
     const aiDeck = selectedAIDeckObj?.cards || blightCurseDeck
@@ -213,35 +219,36 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
             <Label>Tu mazo ({playerDeck.length} cartas)</Label>
             
             {/* Current Deck Display */}
-            <div className="rounded-xl border-2 border-primary bg-primary/10 p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-gray-800 to-green-900">
-                    <Skull className="h-6 w-6 text-green-400" />
+            {playerDeck.length > 0 ? (
+              <div className="rounded-xl border-2 border-primary bg-primary/10 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-gray-800 to-green-900">
+                      <Skull className="h-6 w-6 text-green-400" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-foreground">{playerDeckName}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {playerDeck.length} cartas cargadas
+                        {notFoundCards.length > 0 && (
+                          <span className="ml-1 text-destructive">
+                            ({notFoundCards.length} no encontradas)
+                          </span>
+                        )}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-semibold text-foreground">{playerDeckName}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {playerDeck.length} cartas cargadas
-                      {notFoundCards.length > 0 && (
-                        <span className="ml-1 text-destructive">
-                          ({notFoundCards.length} no encontradas)
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setShowSaveDialog(true)}
-                    className="gap-2"
-                  >
-                    <Save className="h-4 w-4" />
-                    Guardar
-                  </Button>
-                  {notFoundCards.length > 0 && (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setShowSaveDialog(true)}
+                      className="gap-2"
+                    >
+                      <Save className="h-4 w-4" />
+                      Guardar
+                    </Button>
+                    {notFoundCards.length > 0 && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -254,6 +261,19 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
                 </div>
               </div>
             </div>
+            ) : (
+              <div className="rounded-xl border-2 border-dashed border-border bg-secondary/30 p-6">
+                <div className="flex flex-col items-center justify-center text-center gap-2">
+                  <Swords className="h-8 w-8 text-muted-foreground/50" />
+                  <p className="text-sm text-muted-foreground">
+                    No hay mazo seleccionado
+                  </p>
+                  <p className="text-xs text-muted-foreground/70">
+                    Selecciona un mazo guardado o carga uno nuevo
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Not Found Cards Dialog */}
             {showNotFoundDialog && notFoundCards.length > 0 && (
@@ -290,8 +310,8 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
                     variant="outline"
                     onClick={() => {
                       setShowNotFoundDialog(false)
-                      setPlayerDeck(blightCurseDeck)
-                      setPlayerDeckName("Blight Curse")
+                      setPlayerDeck([])
+                      setPlayerDeckName("")
                       setNotFoundCards([])
                       setShowSaveDialog(false)
                     }}
@@ -669,8 +689,9 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
             onClick={handleStart}
             className="h-14 w-full gap-2 text-lg"
             size="lg"
+            disabled={playerDeck.length === 0}
           >
-            <Sparkles className="h-5 w-5" />
+            <Swords className="h-5 w-5" />
             Comenzar Partida
           </Button>
         </div>
