@@ -38,6 +38,8 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
   const [pendingDeckFormat, setPendingDeckFormat] = useState<any>(null)
   const [legendaries, setLegendaries] = useState<string[]>([])
   const [selectedCommander, setSelectedCommander] = useState<string>("")
+  const [notFoundCards, setNotFoundCards] = useState<Array<{ cardName: string; quantity: number }>>([])
+  const [showNotFoundDialog, setShowNotFoundDialog] = useState(false)
 
   // Cargar decks guardados al montar el componente
   useEffect(() => {
@@ -67,10 +69,17 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
         setDeckText("") // Limpiar textarea
       } else {
         // Si no hay legendarias, cargar normalmente
-        const cards = await deckFormatToCards(deckFormat)
+        const result = await deckFormatToCards(deckFormat)
+        const { cards, notFound } = result
         if (cards.length > 0) {
           setPlayerDeck(cards)
           setPlayerDeckName(deckFormat.name)
+          setNotFoundCards(notFound)
+          if (notFound.length > 0) {
+            setShowNotFoundDialog(true)
+          } else {
+            alert(`✅ Mazo cargado: ${cards.length} cartas`)
+          }
           setShowSaveDialog(true)
         } else {
           alert("No se pudieron cargar las cartas del mazo. Verifica los nombres.")
@@ -89,11 +98,18 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
 
     setIsLoadingDeck(true)
     try {
-      const cards = await deckFormatToCards(pendingDeckFormat, selectedCommander)
+      const result = await deckFormatToCards(pendingDeckFormat, selectedCommander)
+      const { cards, notFound } = result
       if (cards.length > 0) {
         setPlayerDeck(cards)
         setPlayerDeckName(pendingDeckFormat.name)
+        setNotFoundCards(notFound)
         setShowCommanderDialog(false)
+        if (notFound.length > 0) {
+          setShowNotFoundDialog(true)
+        } else {
+          alert(`✅ Mazo cargado: ${cards.length} cartas`)
+        }
         setShowSaveDialog(true)
       }
     } catch (error) {
@@ -189,20 +205,84 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
                     <p className="font-semibold text-foreground">{playerDeckName}</p>
                     <p className="text-sm text-muted-foreground">
                       {playerDeck.length} cartas cargadas
+                      {notFoundCards.length > 0 && (
+                        <span className="ml-1 text-destructive">
+                          ({notFoundCards.length} no encontradas)
+                        </span>
+                      )}
                     </p>
                   </div>
                 </div>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowSaveDialog(true)}
-                  className="gap-2"
-                >
-                  <Save className="h-4 w-4" />
-                  Guardar
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowSaveDialog(true)}
+                    className="gap-2"
+                  >
+                    <Save className="h-4 w-4" />
+                    Guardar
+                  </Button>
+                  {notFoundCards.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowNotFoundDialog(true)}
+                      className="gap-2 text-destructive hover:text-destructive"
+                    >
+                      Ver no encontradas ({notFoundCards.length})
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
+
+            {/* Not Found Cards Dialog */}
+            {showNotFoundDialog && notFoundCards.length > 0 && (
+              <div className="rounded-lg border border-destructive bg-destructive/10 p-4 space-y-3">
+                <div>
+                  <Label className="text-sm font-semibold flex items-center gap-2">
+                    ⚠️ {notFoundCards.length} cartas no encontradas en Scryfall
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Estas cartas se omitieron del mazo:
+                  </p>
+                </div>
+                <div className="space-y-1 max-h-64 overflow-y-auto bg-background rounded p-2 border border-border">
+                  {notFoundCards.map((card, idx) => (
+                    <div key={idx} className="text-sm text-muted-foreground flex justify-between">
+                      <span>{card.quantity}x {card.cardName}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-xs text-muted-foreground bg-secondary/50 p-2 rounded">
+                  💡 Verifica que los nombres sean exactos. Algunos nombres pueden tener caracteres especiales o acentos.
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setShowNotFoundDialog(false)
+                    }}
+                  >
+                    Continuar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setShowNotFoundDialog(false)
+                      setPlayerDeck(blightCurseDeck)
+                      setPlayerDeckName("Blight Curse")
+                      setNotFoundCards([])
+                      setShowSaveDialog(false)
+                    }}
+                  >
+                    Cargar otro mazo
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* Commander Selection Dialog */}
             {showCommanderDialog && legendaries.length > 0 && (

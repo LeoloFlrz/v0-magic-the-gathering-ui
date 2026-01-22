@@ -79,11 +79,11 @@ export function CardComponent({
         sizeClasses[size],
         faceDown
           ? "border-purple-900 bg-gradient-to-br from-purple-800 to-purple-900"
-          : `border-black/30 bg-gradient-to-b ${colorClass}`,
+          : "border-black/30",
         card.isTapped && "rotate-90",
         selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
         isDragging && "scale-105 opacity-50",
-        !isDragging && "hover:scale-105 hover:shadow-lg",
+        !isDragging && "hover:scale-110 hover:shadow-xl",
         isDrawing && "animate-draw-card",
         className
       )}
@@ -99,57 +99,31 @@ export function CardComponent({
         </div>
       ) : (
         <>
-          {/* Card Header */}
-          <div className={cn("flex items-start justify-between p-1", textColorClass)}>
-            <span className="truncate font-semibold leading-tight">{card.name}</span>
-            {card.manaCost && (
-              <span className="ml-1 shrink-0 font-mono text-[0.6em] opacity-80">
-                {card.manaCost}
-              </span>
+          {/* Full Card Image */}
+          <div className="relative h-full w-full overflow-hidden rounded-lg">
+            {card.imageUrl ? (
+              <img
+                src={card.imageUrl}
+                alt={card.name}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className={cn(
+                "flex h-full w-full flex-col items-center justify-center font-bold text-white/70 text-center p-2",
+                getCardColorClass(card)
+              )}>
+                <span className="text-[0.7em] line-clamp-3 mb-1">{card.name}</span>
+                {card.manaCost && (
+                  <span className="text-[0.6em] opacity-60">{card.manaCost}</span>
+                )}
+              </div>
             )}
-          </div>
-
-          {/* Card Art Area */}
-          <div className="relative mx-1 flex-1 rounded-sm bg-black/20">
+            
             {/* -1/-1 counter effect overlay */}
             {card.negativeCounters && card.negativeCounters > 0 && (
-              <div className="absolute inset-0 animate-pulse rounded-sm bg-gradient-to-t from-purple-900/60 via-transparent to-transparent" />
+              <div className="absolute inset-0 animate-pulse rounded-lg bg-gradient-to-t from-purple-900/60 via-transparent to-transparent" />
             )}
           </div>
-
-          {/* Card Type */}
-          <div className={cn("px-1 py-0.5 text-center opacity-80", textColorClass)}>
-            <span className="truncate capitalize">
-              {card.subtype ? `${card.type} - ${card.subtype}` : card.type}
-            </span>
-          </div>
-
-          {/* Card Text */}
-          {size !== "sm" && (
-            <div
-              className={cn(
-                "mx-1 mb-1 max-h-12 overflow-hidden rounded-sm bg-black/10 p-1 leading-tight",
-                textColorClass
-              )}
-            >
-              <p className="line-clamp-3 opacity-90">{card.text}</p>
-            </div>
-          )}
-
-          {/* Power/Toughness */}
-          {card.power !== undefined && card.toughness !== undefined && (
-            <div
-              className={cn(
-                "absolute bottom-1 right-1 rounded-sm px-1.5 py-0.5 font-bold",
-                textColorClass,
-                card.negativeCounters && card.negativeCounters > 0
-                  ? "bg-purple-600/80 text-white"
-                  : "bg-black/30"
-              )}
-            >
-              {modifiedPower}/{modifiedToughness}
-            </div>
-          )}
 
           {/* Positive Counters (+1/+1) */}
           {card.counters && card.counters > 0 && (
@@ -182,30 +156,125 @@ export function CardComponent({
 
   return (
     <TooltipProvider>
-      <Tooltip delayDuration={300}>
+      <Tooltip delayDuration={200}>
         <TooltipTrigger asChild>{cardElement}</TooltipTrigger>
-        <TooltipContent side="top" className="max-w-xs">
-          <div className="space-y-1">
-            <div className="flex items-center justify-between gap-4">
-              <span className="font-semibold">{card.name}</span>
-              {card.manaCost && (
-                <span className="font-mono text-muted-foreground">{card.manaCost}</span>
-              )}
-            </div>
-            <p className="text-xs capitalize text-muted-foreground">
-              {card.subtype ? `${card.type} - ${card.subtype}` : card.type}
-            </p>
-            <p className="text-sm">{card.text}</p>
-            {card.power !== undefined && card.toughness !== undefined && (
-              <p className="text-right font-bold">
-                {modifiedPower}/{modifiedToughness}
-                {card.negativeCounters && card.negativeCounters > 0 && (
-                  <span className="ml-2 text-purple-400">
-                    ({card.negativeCounters} contador{card.negativeCounters > 1 ? "es" : ""} -1/-1)
-                  </span>
+        <TooltipContent side="right" className="w-[520px] p-0 border-0">
+          <div className="overflow-hidden rounded-lg bg-background border border-border shadow-2xl">
+            <div className="grid grid-cols-2 gap-4 p-4">
+              {/* Left: Full Card Image */}
+              <div className="flex flex-col gap-3">
+                <div className="rounded-lg overflow-hidden border border-border">
+                  {card.imageUrl ? (
+                    <img
+                      src={card.imageUrl}
+                      alt={card.name}
+                      className="w-full h-auto object-cover"
+                    />
+                  ) : (
+                    <div className={cn(
+                      "flex h-80 w-full flex-col items-center justify-center font-bold text-white/70 text-center p-4",
+                      getCardColorClass(card)
+                    )}>
+                      <span className="text-lg line-clamp-3 mb-2">{card.name}</span>
+                      {card.manaCost && (
+                        <span className="text-sm opacity-60">{card.manaCost}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right: Card Details */}
+              <div className="flex flex-col gap-3 text-foreground max-h-96 overflow-y-auto pr-2">
+                {/* Name and Mana Cost */}
+                <div className="border-b border-border pb-2">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <h3 className="font-bold text-base leading-tight">{card.name}</h3>
+                    {card.manaCost && (
+                      <span className="font-mono text-sm bg-muted px-2 py-1 rounded whitespace-nowrap">
+                        {card.manaCost}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Type Line */}
+                <div className="border-b border-border pb-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    {card.subtype ? `${card.type.toUpperCase()} — ${card.subtype}` : card.type.toUpperCase()}
+                  </p>
+                </div>
+
+                {/* Oracle Text */}
+                <div className="border-b border-border pb-2">
+                  <p className="text-sm leading-tight whitespace-pre-wrap font-serif">
+                    {card.text || "No text."}
+                  </p>
+                </div>
+
+                {/* Power/Toughness or Other Info */}
+                <div className="space-y-1">
+                  {card.power !== undefined && card.toughness !== undefined && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-semibold">Power/Toughness:</span>
+                      <span className="font-bold text-base">
+                        {modifiedPower}/{modifiedToughness}
+                      </span>
+                    </div>
+                  )}
+                  
+                  {card.isLegendary && (
+                    <div className="flex items-center gap-2 text-xs bg-amber-500/20 px-2 py-1 rounded border border-amber-500/30">
+                      <span>⭐ Legendary</span>
+                    </div>
+                  )}
+
+                  {card.isCommander && (
+                    <div className="flex items-center gap-2 text-xs bg-blue-500/20 px-2 py-1 rounded border border-blue-500/30">
+                      <span>👑 Commander</span>
+                    </div>
+                  )}
+
+                  {card.negativeCounters && card.negativeCounters > 0 && (
+                    <div className="flex items-center gap-2 text-xs bg-purple-500/20 px-2 py-1 rounded border border-purple-500/30">
+                      <span>-1/-1 Counters: {card.negativeCounters}</span>
+                    </div>
+                  )}
+
+                  {card.counters && card.counters > 0 && (
+                    <div className="flex items-center gap-2 text-xs bg-green-500/20 px-2 py-1 rounded border border-green-500/30">
+                      <span>+1/+1 Counters: {card.counters}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Colors */}
+                {card.colors && card.colors.length > 0 && (
+                  <div className="border-t border-border pt-2">
+                    <p className="text-xs font-semibold text-muted-foreground mb-1">COLORS:</p>
+                    <div className="flex gap-1">
+                      {card.colors.map((color) => (
+                        <div
+                          key={color}
+                          className="w-5 h-5 rounded-full border border-foreground/30 flex items-center justify-center text-[10px] font-bold"
+                          title={color}
+                        >
+                          {color}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
-              </p>
-            )}
+
+                {/* CMC */}
+                {card.cmc > 0 && (
+                  <div className="border-t border-border pt-2 flex items-center justify-between text-sm">
+                    <span className="text-xs font-semibold text-muted-foreground">CMC:</span>
+                    <span className="font-bold">{card.cmc}</span>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </TooltipContent>
       </Tooltip>

@@ -69,12 +69,14 @@ export function parseDeckText(deckText: string): DeckFormat {
 
 /**
  * Convierte un DeckFormat a un array de cartas de juego
+ * Retorna también información de cartas no encontradas
  */
 export async function deckFormatToCards(
   deckFormat: DeckFormat,
   selectedCommanderName?: string
-): Promise<Card[]> {
+): Promise<{ cards: Card[]; notFound: Array<{ cardName: string; quantity: number }> }> {
   const cards: Card[] = []
+  const notFound: Array<{ cardName: string; quantity: number }> = []
   const allCardLines = [...deckFormat.mainboard]
 
   // Primera pasada: cargar todas las cartas e identificar legendarias
@@ -95,9 +97,12 @@ export async function deckFormatToCards(
           card,
           isLegendary: card.isLegendary || false,
         })
+      } else {
+        notFound.push({ cardName, quantity })
       }
     } catch (error) {
       console.error(`Error loading card: ${cardName}`)
+      notFound.push({ cardName, quantity })
     }
   }
 
@@ -138,7 +143,7 @@ export async function deckFormatToCards(
     }
   }
 
-  return cards
+  return { cards, notFound }
 }
 
 /**
