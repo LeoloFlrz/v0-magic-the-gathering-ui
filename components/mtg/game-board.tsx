@@ -967,12 +967,13 @@ export function GameBoard() {
           return prev
         })
         
+        // Wait for animation to complete: 900ms base + (numCards-1)*100ms delay
         setTimeout(() => {
           setCardsDrawing([])
           setMulliganAnimating(false)
           setMulliganCount(newMulliganCount)
-        }, 800)
-      }, 500)
+        }, 1400)
+      }, 400)
     }, 700)
   }, [gameState, mulliganCount, mulliganAnimating])
 
@@ -1085,37 +1086,12 @@ export function GameBoard() {
                 </div>
               )
             })}
-            
-            {/* Cards coming FROM library */}
-            {cardsDrawing.map((cardId, index) => {
-              const handSize = cardsDrawing.length
-              // Calculate card's target position in hand
-              const cardSpacing = Math.min(100, 600 / handSize)
-              const targetX = (index - (handSize - 1) / 2) * cardSpacing
-              const targetY = 300 // Move down to hand area
-              
-              return (
-                <div
-                  key={cardId}
-                  className="absolute animate-card-from-library"
-                  style={{
-                    left: '50%',
-                    top: '120px',
-                    '--target-x': `${targetX}px`,
-                    '--target-y': `${targetY}px`,
-                    animationDelay: `${index * 80}ms`,
-                    zIndex: 100 + index,
-                  } as React.CSSProperties}
-                >
-                  <div className="h-52 w-36 rounded-lg border-2 border-purple-900 bg-gradient-to-br from-purple-800 to-purple-900 shadow-2xl -translate-x-1/2 -translate-y-1/2" />
-                </div>
-              )
-            })}
           </div>
 
           {/* Hand Display */}
-          <div className="flex-1 flex items-center justify-center">
-            <div className="flex flex-wrap justify-center gap-3 p-4 rounded-xl border-2 border-primary/30 bg-primary/5">
+          <div className="flex-1 flex items-center justify-center" id="mulligan-hand-container">
+            <div className="flex justify-center gap-3 p-4 rounded-xl border-2 border-primary/30 bg-primary/5 relative">
+              {/* Static hand cards (shown when not animating) */}
               {!mulliganAnimating && gameState.player.zones.hand.map((card, index) => (
                 <div
                   key={card.id}
@@ -1144,7 +1120,65 @@ export function GameBoard() {
                 </div>
               ))}
               
-              {mulliganAnimating && (
+              {/* Animated drawing cards - positioned to end exactly where static cards will be */}
+              {cardsDrawing.length > 0 && gameState.player.zones.hand.map((card, index) => {
+                const isDrawing = cardsDrawing.includes(card.id)
+                if (!isDrawing) return null
+                const drawIndex = cardsDrawing.indexOf(card.id)
+                
+                return (
+                  <div
+                    key={`drawing-${card.id}`}
+                    className="relative animate-card-from-library-inplace"
+                    style={{
+                      animationDelay: `${drawIndex * 100}ms`,
+                      perspective: '1000px',
+                    } as React.CSSProperties}
+                  >
+                    <div className="relative h-52 w-36" style={{ transformStyle: 'preserve-3d' }}>
+                      {/* Card back (visible during travel) */}
+                      <div 
+                        className="absolute inset-0 rounded-lg border-2 border-purple-900 bg-gradient-to-br from-purple-800 to-purple-900 shadow-2xl"
+                        style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+                      >
+                        <div className="h-full w-full flex items-center justify-center p-2">
+                          <div className="h-full w-full rounded border-2 border-purple-700/50 bg-purple-900/30 flex items-center justify-center">
+                            <div className="text-4xl font-bold text-purple-400/80">✦</div>
+                          </div>
+                        </div>
+                      </div>
+                      {/* Card front (revealed on flip) */}
+                      <div 
+                        className="absolute inset-0 rounded-lg shadow-2xl overflow-hidden"
+                        style={{ backfaceVisibility: 'hidden' }}
+                      >
+                        {card?.imageUrl ? (
+                          <img
+                            src={card.imageUrl}
+                            alt={card?.name || ''}
+                            className="h-full w-full object-cover rounded-lg"
+                          />
+                        ) : (
+                          <div className="h-full w-full rounded-lg bg-gradient-to-br from-gray-700 to-gray-800 p-2 flex flex-col justify-between border border-gray-600">
+                            <div>
+                              <span className="text-xs font-semibold text-white block truncate">{card?.name}</span>
+                              <span className="text-[10px] text-gray-400">{card?.manaCost}</span>
+                            </div>
+                            <div>
+                              <span className="text-[8px] text-gray-400 truncate block">{card?.type}</span>
+                              {card?.power !== undefined && (
+                                <span className="text-[10px] text-white block">{card?.power}/{card?.toughness}</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+              
+              {mulliganAnimating && cardsDrawing.length === 0 && cardsReturning.length === 0 && (
                 <div className="flex items-center justify-center h-52 w-full">
                   <div className="text-center">
                     <RefreshCw className="h-8 w-8 animate-spin text-primary mx-auto mb-2" />
