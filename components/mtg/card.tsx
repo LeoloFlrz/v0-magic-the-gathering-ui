@@ -182,19 +182,7 @@ export function CardComponent({
             )}
           </div>
 
-          {/* Positive Counters (+1/+1) */}
-          {card.counters && card.counters > 0 && (
-            <div className="absolute left-1 top-6 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-[10px] font-bold text-white shadow">
-              +{card.counters}
-            </div>
-          )}
 
-          {/* Negative Counters (-1/-1) */}
-          {card.negativeCounters && card.negativeCounters > 0 && (
-            <div className="counter-minus-effect absolute left-1 top-6 flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-purple-600 to-purple-800 text-[10px] font-bold text-white shadow-lg ring-2 ring-purple-400/50">
-              -{card.negativeCounters}
-            </div>
-          )}
 
           {/* Commander indicator */}
           {card.isCommander && (
