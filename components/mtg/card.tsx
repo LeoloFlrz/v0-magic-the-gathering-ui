@@ -28,9 +28,9 @@ interface CardComponentProps {
 }
 
 const sizeClasses = {
-  sm: "w-12 h-16 text-[6px]",
-  md: "w-20 h-28 text-[8px]",
-  lg: "w-32 h-44 text-xs",
+  sm: "w-12 h-[67px] text-[6px] rounded-[4px]",
+  md: "w-20 h-[111px] text-[8px] rounded-[6px]",
+  lg: "w-32 h-[178px] text-xs rounded-[10px]",
 }
 
 // Componente para renderizar símbolos de mana
@@ -134,7 +134,7 @@ export function CardComponent({
   const cardElement = (
     <div
       className={cn(
-        "relative flex cursor-pointer flex-col overflow-hidden rounded-lg border-2 shadow-md transition-all",
+        "relative flex cursor-pointer flex-col overflow-hidden border shadow-md transition-all",
         sizeClasses[size],
         faceDown
           ? "border-purple-900 bg-gradient-to-br from-purple-800 to-purple-900"
@@ -160,7 +160,7 @@ export function CardComponent({
       ) : (
         <>
           {/* Full Card Image */}
-          <div className="relative h-full w-full overflow-hidden rounded-lg">
+          <div className="relative h-full w-full overflow-hidden">
             {card.imageUrl ? (
               <img
                 src={card.imageUrl}
@@ -186,16 +186,16 @@ export function CardComponent({
           </div>
 
           {/* Positive Counters (+1/+1) */}
-          {card.counters && card.counters > 0 && (
+          {!!card.counters && card.counters > 0 && (
             <div className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-green-400 to-green-600 text-[11px] font-bold text-white shadow-lg ring-2 ring-green-300 animate-pulse">
               +{card.counters}
             </div>
           )}
 
           {/* Negative Counters (-1/-1) */}
-          {card.negativeCounters && card.negativeCounters > 0 && (
+          {!!card.negativeCounters && card.negativeCounters > 0 && (
             <div className="counter-minus-effect absolute bottom-2 right-2 flex h-5 w-8 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-purple-700 text-[8px] font-bold text-white shadow-lg ring-1 ring-purple-300 animate-pulse">
-              -{card.negativeCounters}/{card.negativeCounters}
+              -{card.negativeCounters}/-{card.negativeCounters}
             </div>
           )}
 
