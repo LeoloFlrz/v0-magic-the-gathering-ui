@@ -84,6 +84,8 @@ export function GameBoard() {
   const [cardsReturning, setCardsReturning] = useState<string[]>([])
   const [cardsDrawing, setCardsDrawing] = useState<string[]>([])
 
+  const [pendingAdvancePhase, setPendingAdvancePhase] = useState(false)
+
   const handleStartGame = (config: GameConfig) => {
     setGameConfig(config)
     setGameState(createInitialGameState(config))
@@ -216,7 +218,7 @@ export function GameBoard() {
 
       setSelectedCard({ card, zone, owner })
     },
-    [gameState, addLog, counterTargetMode]
+    [gameState, addLog, counterTargetMode, combatMode, selectedBlockers, pendingBlocker]
   )
 
   // Handle play card from drag and drop
@@ -494,15 +496,27 @@ export function GameBoard() {
     setCombatMode("none")
     setSelectedBlockers([])
     setPendingBlocker(null)
+    
+    // If AI was attacking, signal to advance to combat damage phase
+    if (gameState.activePlayer === "opponent") {
+      setPendingAdvancePhase(true)
+    }
   }, [gameState, selectedBlockers, addLog])
 
   // Cancel combat selection
   const cancelCombatSelection = useCallback(() => {
+    const wasDefending = gameState?.activePlayer === "opponent" && gameState?.phase === "combat_blockers"
+    
     setCombatMode("none")
     setSelectedAttackers([])
     setSelectedBlockers([])
     setPendingBlocker(null)
-  }, [])
+    
+    // If AI was attacking and we cancel, signal to advance to damage phase (no blockers)
+    if (wasDefending) {
+      setPendingAdvancePhase(true)
+    }
+  }, [gameState])
 
   // Advance to next phase
   const advancePhase = useCallback(() => {
@@ -618,6 +632,17 @@ export function GameBoard() {
       return newState
     })
   }, [addLog])
+
+  // Effect to handle pending phase advance (to avoid circular dependency)
+  useEffect(() => {
+    if (pendingAdvancePhase) {
+      setPendingAdvancePhase(false)
+      const timeout = setTimeout(() => {
+        advancePhase()
+      }, 300)
+      return () => clearTimeout(timeout)
+    }
+  }, [pendingAdvancePhase, advancePhase])
 
   // Pass turn (skip to cleanup)
   const passTurn = useCallback(() => {
@@ -781,12 +806,52 @@ export function GameBoard() {
       return () => clearTimeout(timeout)
     }
 
-    // AI is the attacker - auto advance through blockers and damage phases
-    if (gameState.phase === "combat_blockers" || gameState.phase === "combat_damage") {
+    // AI is the attacker - only auto advance combat_damage phase, not blockers
+    // During combat_blockers, player needs to declare blockers first
+    if (gameState.phase === "combat_damage") {
       const timeout = setTimeout(() => {
         advancePhase()
       }, 800)
       return () => clearTimeout(timeout)
+    }
+    
+    // AI is the attacker during combat_blockers - let player declare blockers
+    if (gameState.phase === "combat_blockers") {
+      // Check if AI has attacking creatures
+      if (gameState.opponent.attackingCreatures.length > 0) {
+        // Check if player has any untapped creatures that can block
+        const playerCanBlock = gameState.player.zones.battlefield.some(
+          (c) => c.type === "creature" && !c.isTapped
+        )
+        
+        if (!playerCanBlock) {
+          // Player has no creatures to block - auto advance
+          const timeout = setTimeout(() => {
+            addLog("No tienes criaturas para bloquear")
+            advancePhase()
+          }, 500)
+          return () => clearTimeout(timeout)
+        }
+        
+        // Player can block - enable blocking mode
+        if (combatMode !== "declaring_blockers") {
+          setCombatMode("declaring_blockers")
+          setSelectedBlockers([])
+          setPendingBlocker(null)
+          // Note: addLog is called via setTimeout to avoid infinite re-renders
+          setTimeout(() => {
+            addLog("Declara bloqueadores contra los atacantes de la IA")
+          }, 0)
+        }
+        // Don't auto-advance - wait for player to confirm blockers
+        return
+      } else {
+        // No attackers, auto-advance
+        const timeout = setTimeout(() => {
+          advancePhase()
+        }, 500)
+        return () => clearTimeout(timeout)
+      }
     }
 
     // Main phases - play cards then advance
@@ -843,7 +908,7 @@ export function GameBoard() {
       }, 500)
       return () => clearTimeout(timeout)
     }
-  }, [gameState, addLog, passTurn, advancePhase])
+  }, [gameState, addLog, passTurn, advancePhase, combatMode])
 
   // AI blocking logic - when player attacks, AI blocks
   useEffect(() => {
@@ -865,6 +930,20 @@ export function GameBoard() {
 
     if (attackerCards.length === 0) {
       const timeout = setTimeout(() => {
+        advancePhase()
+      }, 500)
+      return () => clearTimeout(timeout)
+    }
+
+    // Check if AI has any untapped creatures that can block
+    const aiCanBlock = gameState.opponent.zones.battlefield.some(
+      (c) => c.type === "creature" && !c.isTapped
+    )
+    
+    if (!aiCanBlock) {
+      // AI has no creatures to block - auto advance quickly
+      const timeout = setTimeout(() => {
+        addLog("IA no tiene criaturas para bloquear")
         advancePhase()
       }, 500)
       return () => clearTimeout(timeout)
