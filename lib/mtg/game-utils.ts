@@ -155,8 +155,12 @@ export function playCard(player: Player, cardId: string): Player {
   // Lands and permanents go to battlefield, instants/sorceries to graveyard
   const isPermanent = ["creature", "artifact", "enchantment", "land", "planeswalker"].includes(card.type)
 
+  // Mark that a land has been played if this is a land
+  const hasPlayedLand = card.type === "land" ? true : player.hasPlayedLandThisTurn
+
   return {
     ...player,
+    hasPlayedLandThisTurn: hasPlayedLand,
     zones: {
       ...player.zones,
       hand: newHand,
@@ -183,6 +187,8 @@ export function tapCard(player: Player, cardId: string): Player {
 export function untapAll(player: Player): Player {
   return {
     ...player,
+    hasDrawnThisTurn: false,
+    hasPlayedLandThisTurn: false,
     zones: {
       ...player.zones,
       battlefield: player.zones.battlefield.map((c) => ({ ...c, isTapped: false })),

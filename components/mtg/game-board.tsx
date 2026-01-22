@@ -45,6 +45,12 @@ import {
   PHASE_ORDER,
   addNegativeCounter,
 } from "@/lib/mtg/game-utils"
+import {
+  makeMainPhaseDecision,
+  makeCombatDecision,
+  makeBlockDecision,
+  executeAIPlay,
+} from "@/lib/mtg/ai-engine"
 
 export function GameBoard() {
   const [gameStarted, setGameStarted] = useState(false)
@@ -89,7 +95,8 @@ export function GameBoard() {
           if (!prev) return prev
           return {
             ...prev,
-            [owner]: addNegativeCounter(prev[owner], card.id),
+            player: owner === "player" ? addNegativeCounter(prev.player, card.id) : prev.player,
+            opponent: owner === "opponent" ? addNegativeCounter(prev.opponent, card.id) : prev.opponent,
           }
         })
         addLog(`Pones un contador -1/-1 en ${card.name}`)
@@ -119,6 +126,12 @@ export function GameBoard() {
         (gameState.phase === "main1" || gameState.phase === "main2") &&
         gameState.activePlayer === "player"
       ) {
+        // Check if trying to play a land and already played one this turn
+        if (card.type === "land" && gameState.player.hasPlayedLandThisTurn) {
+          addLog("Ya has jugado una tierra este turno")
+          return
+        }
+
         setGameState((prev) => {
           if (!prev) return prev
           return {
@@ -142,6 +155,12 @@ export function GameBoard() {
 
       const card = gameState.player.zones.hand.find((c) => c.id === cardId)
       if (!card) return
+
+      // Check if trying to play a land and already played one this turn
+      if (card.type === "land" && gameState.player.hasPlayedLandThisTurn) {
+        addLog("Ya has jugado una tierra este turno")
+        return
+      }
 
       if (
         (gameState.phase === "main1" || gameState.phase === "main2") &&
@@ -286,31 +305,38 @@ export function GameBoard() {
       if (nextPhase === "untap" && prev.phase === "cleanup") {
         // New turn
         const newActivePlayer = prev.activePlayer === "player" ? "opponent" : "player"
+        const newTurn = newActivePlayer === "player" ? prev.turn + 1 : prev.turn
         newState = {
           ...newState,
-          turn: prev.turn + (newActivePlayer === "player" ? 1 : 0),
+          turn: newTurn,
           activePlayer: newActivePlayer,
           priorityPlayer: newActivePlayer,
-          [newActivePlayer]: untapAll(prev[newActivePlayer]),
+          player: newActivePlayer === "player" ? untapAll(prev.player) : prev.player,
+          opponent: newActivePlayer === "opponent" ? untapAll(prev.opponent) : prev.opponent,
         }
         addLog(`--- Turno ${newState.turn}: ${newActivePlayer === "player" ? "Tu turno" : "Turno de IA"} ---`)
       }
 
       if (nextPhase === "draw" && prev.phase === "upkeep") {
-        // Draw phase
-        const { player: updatedPlayer, drawnCard } = drawCard(newState[newState.activePlayer])
-        if (drawnCard) {
-          if (newState.activePlayer === "player") {
+        // Draw phase - draw card for active player
+        if (newState.activePlayer === "player") {
+          const { player: updatedPlayer, drawnCard } = drawCard(newState.player)
+          if (drawnCard) {
             setDrawingCardId(drawnCard.id)
             setTimeout(() => setDrawingCardId(null), 500)
-          }
-          newState = {
-            ...newState,
-            [newState.activePlayer]: updatedPlayer,
-          }
-          if (newState.activePlayer === "player") {
+            newState = {
+              ...newState,
+              player: updatedPlayer,
+            }
             addLog(`Robas ${drawnCard.name}`)
-          } else {
+          }
+        } else {
+          const { player: updatedOpponent, drawnCard } = drawCard(newState.opponent)
+          if (drawnCard) {
+            newState = {
+              ...newState,
+              opponent: updatedOpponent,
+            }
             addLog("IA roba una carta")
           }
         }
@@ -322,25 +348,91 @@ export function GameBoard() {
 
   // Pass turn (skip to cleanup)
   const passTurn = useCallback(() => {
-    if (!gameState) return
-
     setGameState((prev) => {
       if (!prev) return prev
 
       const newActivePlayer = prev.activePlayer === "player" ? "opponent" : "player"
-      return {
+      const newTurn = newActivePlayer === "player" ? prev.turn + 1 : prev.turn
+      
+      const newState = {
         ...prev,
         phase: "untap",
-        turn: prev.turn + (newActivePlayer === "player" ? 1 : 0),
+        turn: newTurn,
         activePlayer: newActivePlayer,
         priorityPlayer: newActivePlayer,
-        [newActivePlayer]: untapAll(prev[newActivePlayer]),
+        player: newActivePlayer === "player" ? untapAll(prev.player) : prev.player,
+        opponent: newActivePlayer === "opponent" ? untapAll(prev.opponent) : prev.opponent,
       }
+      
+      const playerLabel = newActivePlayer === "player" ? "Tu turno" : "Turno de IA"
+      addLog(`--- Turno ${newTurn}: ${playerLabel} ---`)
+      
+      return newState
     })
-    addLog(`--- Turno ${gameState.turn + (gameState.activePlayer === "opponent" ? 1 : 0)}: ${gameState.activePlayer === "player" ? "Turno de IA" : "Tu turno"} ---`)
-  }, [gameState, addLog])
+  }, [addLog])
 
-  // Simple AI logic
+  // Auto-advance player's turn through initial phases
+  useEffect(() => {
+    if (!gameState || gameState.activePlayer !== "player") return
+    
+    // Auto-advance from untap, upkeep, and draw to reach main1
+    if (gameState.phase !== "untap" && gameState.phase !== "upkeep" && gameState.phase !== "draw") return
+    
+    const timeout = setTimeout(() => {
+      setGameState((prev) => {
+        if (!prev) return prev
+
+        const nextPhase = getNextPhase(prev.phase)
+        let newState = { ...prev, phase: nextPhase }
+
+        // Handle phase transitions
+        if (nextPhase === "untap" && prev.phase === "cleanup") {
+          const newActivePlayer = prev.activePlayer === "player" ? "opponent" : "player"
+          const newTurn = newActivePlayer === "player" ? prev.turn + 1 : prev.turn
+          newState = {
+            ...newState,
+            turn: newTurn,
+            activePlayer: newActivePlayer,
+            priorityPlayer: newActivePlayer,
+            player: newActivePlayer === "player" ? untapAll(prev.player) : prev.player,
+            opponent: newActivePlayer === "opponent" ? untapAll(prev.opponent) : prev.opponent,
+          }
+          addLog(`--- Turno ${newState.turn}: ${newActivePlayer === "player" ? "Tu turno" : "Turno de IA"} ---`)
+        }
+
+        if (nextPhase === "draw" && prev.phase === "upkeep") {
+          // Draw phase - draw card for active player
+          if (newState.activePlayer === "player") {
+            const { player: updatedPlayer, drawnCard } = drawCard(newState.player)
+            if (drawnCard) {
+              setDrawingCardId(drawnCard.id)
+              setTimeout(() => setDrawingCardId(null), 500)
+              newState = {
+                ...newState,
+                player: updatedPlayer,
+              }
+              addLog(`Robas ${drawnCard.name}`)
+            }
+          } else {
+            const { player: updatedOpponent, drawnCard } = drawCard(newState.opponent)
+            if (drawnCard) {
+              newState = {
+                ...newState,
+                opponent: updatedOpponent,
+              }
+              addLog("IA roba una carta")
+            }
+          }
+        }
+
+        return newState
+      })
+    }, 500)
+    
+    return () => clearTimeout(timeout)
+  }, [gameState?.phase, gameState?.activePlayer])
+
+  // Advanced AI logic
   useEffect(() => {
     if (!gameState || gameState.activePlayer !== "opponent") return
 
@@ -350,45 +442,108 @@ export function GameBoard() {
         if (!prev) return prev
 
         let newOpponent = prev.opponent
+        let gameLog: string[] = []
 
         // Main phase - play cards
         if (prev.phase === "main1" || prev.phase === "main2") {
-          // Try to play a land
-          const landInHand = newOpponent.zones.hand.find((c) => c.type === "land")
-          if (landInHand) {
-            newOpponent = playCard(newOpponent, landInHand.id)
-            addLog(`IA juega ${landInHand.name}`)
-          }
-
-          // Try to play a creature
-          const creatureInHand = newOpponent.zones.hand.find(
-            (c) => c.type === "creature" && c.cmc <= newOpponent.zones.battlefield.filter((b) => b.type === "land" && !b.isTapped).length
-          )
-          if (creatureInHand) {
-            newOpponent = playCard(newOpponent, creatureInHand.id)
-            // Tap lands for mana
-            const landsToTap = newOpponent.zones.battlefield
-              .filter((c) => c.type === "land" && !c.isTapped)
-              .slice(0, creatureInHand.cmc)
-            for (const land of landsToTap) {
-              newOpponent = tapCard(newOpponent, land.id)
+          let madeAction = true
+          while (madeAction) {
+            madeAction = false
+            const decision = makeMainPhaseDecision(prev, newOpponent, prev.player)
+            
+            if (decision.type === "pass") {
+              addLog(decision.message)
+              break
             }
-            addLog(`IA juega ${creatureInHand.name}`)
+
+            // Execute the decision
+            const { newState, tappedLands } = executeAIPlay({ ...prev, opponent: newOpponent }, decision)
+            newOpponent = newState.opponent
+            addLog(decision.message)
+            madeAction = true
+          }
+        }
+
+        // Combat phase - attack
+        if (prev.phase === "combat_attackers") {
+          const { attackers, message } = makeCombatDecision(prev, newOpponent, prev.player)
+          if (attackers.length > 0) {
+            // Set attacking creatures
+            newOpponent = {
+              ...newOpponent,
+              attackingCreatures: attackers.map((a) => ({
+                cardId: a.id,
+                targetPlayerId: "player" as const,
+              })),
+            }
+            addLog(message)
+          } else {
+            addLog(message)
           }
         }
 
         return { ...prev, opponent: newOpponent }
       })
 
-      // AI passes after main phase actions
+      // AI passes after action
       setTimeout(() => {
         passTurn()
         setAiThinking(false)
-      }, 1000)
+      }, 1500)
     }, 1500)
 
     return () => clearTimeout(timeout)
   }, [gameState, addLog, passTurn])
+
+  // AI blocking logic
+  useEffect(() => {
+    if (!gameState || gameState.activePlayer !== "player" || gameState.phase !== "combat_blockers") return
+    
+    // Check if opponent has attacking creatures
+    const attackingCreatures = gameState.opponent.attackingCreatures
+    if (attackingCreatures.length === 0) return
+
+    const attackerCards = gameState.opponent.zones.battlefield.filter((c) =>
+      attackingCreatures.some((a) => a.cardId === c.id)
+    )
+
+    if (attackerCards.length === 0) return
+
+    setAiThinking(true)
+    const timeout = setTimeout(() => {
+      setGameState((prev) => {
+        if (!prev) return prev
+
+        const { blocks, message } = makeBlockDecision(
+          attackerCards,
+          prev.player,
+          prev.opponent
+        )
+
+        // Update blocking creatures
+        let newPlayer = { ...prev.player }
+        for (const { blocker, attacker } of blocks) {
+          newPlayer = {
+            ...newPlayer,
+            blockingCreatures: [
+              ...newPlayer.blockingCreatures,
+              {
+                blockerId: blocker.id,
+                attackerId: attacker.id,
+              },
+            ],
+          }
+        }
+
+        addLog(message)
+        return { ...prev, player: newPlayer }
+      })
+
+      setAiThinking(false)
+    }, 1000)
+
+    return () => clearTimeout(timeout)
+  }, [gameState, addLog])
 
   // Dice roller
   const rollDice = (sides: number = 20) => {
