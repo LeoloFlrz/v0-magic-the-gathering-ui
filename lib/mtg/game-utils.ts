@@ -1,4 +1,4 @@
-import type { Card, GameState, Player, GameZone, GamePhase, GameConfig } from "./types"
+import type { Card, GameState, Player, GameZone, GamePhase, GameConfig, ManaColor } from "./types"
 import { blightCurseDeck } from "./sample-deck"
 import { getAIDeck } from "./ai-decks"
 
@@ -381,12 +381,88 @@ export function tapCard(player: Player, cardId: string): Player {
   }
 }
 
-// Tapear una tierra para generar mana según su nombre
+// Interpretar el texto de la carta para extraer qué tipo de maná produce cuando se gira
+function parseManaFromText(text: string): { colors: ManaColor[]; amount: number } {
+  const colors: ManaColor[] = []
+  
+  // Buscar el patrón {T}: Add ... que indica qué mana produce al girarse
+  // Patrones soportados:
+  // "{T}: Add {B}."
+  // "{T}: Add {B} or {G}."
+  // "{T}: Add {B}{G}."
+  // "({T}: Add {B} or {G}.)"
+  
+  const tapAddRegex = /\{T\}:\s*Add\s+([^.]+)\./gi
+  const matches = [...text.matchAll(tapAddRegex)]
+  
+  for (const match of matches) {
+    const manaText = match[1]
+    
+    // Extraer todos los símbolos de maná {X}
+    const manaSymbols = manaText.match(/\{([WUBRGC])\}/gi)
+    if (manaSymbols) {
+      for (const symbol of manaSymbols) {
+        const color = symbol.replace(/[{}]/g, '').toUpperCase() as ManaColor
+        // Agregar cada símbolo encontrado (permite duplicados para tierras que dan 2 del mismo)
+        colors.push(color)
+      }
+    }
+  }
+  
+  // También buscar patrones sin {T}: como "Add {B}{G}" directamente
+  if (colors.length === 0) {
+    const addManaRegex = /Add\s+([^.]+)\./gi
+    const addMatches = [...text.matchAll(addManaRegex)]
+    
+    for (const match of addMatches) {
+      const manaText = match[1]
+      const manaSymbols = manaText.match(/\{([WUBRGC])\}/gi)
+      if (manaSymbols) {
+        for (const symbol of manaSymbols) {
+          const color = symbol.replace(/[{}]/g, '').toUpperCase() as ManaColor
+          colors.push(color)
+        }
+      }
+    }
+  }
+  
+  // Buscar patrones con texto como "one mana of any color"
+  if (colors.length === 0 && text.toLowerCase().includes("mana of any color")) {
+    colors.push("C") // Tratamos como colorless por simplicidad
+  }
+  
+  return { colors, amount: colors.length || 1 }
+}
+
+// Tapear una tierra para generar mana según su nombre o texto
 export function tapLandForMana(player: Player, cardId: string): Player {
   const land = player.zones.battlefield.find((c) => c.id === cardId && c.type === "land")
   if (!land || land.isTapped) return player
 
-  // Generar mana según el tipo de tierra
+  // Primero intentar parsear el texto de la carta
+  const cardText = land.text || ""
+  const parsedMana = parseManaFromText(cardText)
+  
+  // Si encontramos maná en el texto, usarlo
+  if (parsedMana.colors.length > 0) {
+    let newMana = { ...player.mana }
+    for (const color of parsedMana.colors) {
+      newMana[color] = newMana[color] + 1
+    }
+    
+    return {
+      ...player,
+      mana: newMana,
+      zones: {
+        ...player.zones,
+        battlefield: player.zones.battlefield.map((c) =>
+          c.id === cardId ? { ...c, isTapped: true } : c
+        ),
+      },
+    }
+  }
+
+  // Fallback: Generar mana según el tipo de tierra por nombre
   const manaMap: { [key: string]: keyof typeof player.mana } = {
     "white": "W",
     "blue": "U",
