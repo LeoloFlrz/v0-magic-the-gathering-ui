@@ -318,6 +318,7 @@ export function drawCard(player: Player): { player: Player; drawnCard: Card | nu
   return {
     player: {
       ...player,
+      hasDrawnThisTurn: true,
       zones: {
         ...player.zones,
         library: rest,

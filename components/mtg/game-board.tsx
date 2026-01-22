@@ -267,6 +267,12 @@ export function GameBoard() {
   const handleDrawCard = useCallback(() => {
     if (!gameState) return
 
+    // Solo se puede robar una carta por turno (salvo efectos de cartas)
+    if (gameState.player.hasDrawnThisTurn) {
+      addLog("Ya has robado una carta este turno")
+      return
+    }
+
     const { player: newPlayer, drawnCard } = drawCard(gameState.player)
     if (drawnCard) {
       setDrawingCardId(drawnCard.id)
