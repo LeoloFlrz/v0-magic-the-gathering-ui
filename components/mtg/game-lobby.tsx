@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -12,10 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Users, Heart, Sparkles, Skull, Swords, Upload, Loader2 } from "lucide-react"
+import { Users, Heart, Sparkles, Skull, Swords, Upload, Loader2, Trash2, Save } from "lucide-react"
 import type { GameConfig, Card } from "@/lib/mtg/types"
 import { parseDeckText, deckFormatToCards, PRESET_DECKS } from "@/lib/mtg/deck-service"
 import { blightCurseDeck } from "@/lib/mtg/sample-deck"
+import { getSavedDecks, saveDeck, deleteDeck, type SavedDeck } from "@/lib/mtg/deck-storage"
 
 interface GameLobbyProps {
   onStartGame: (config: GameConfig) => void
@@ -30,6 +31,14 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
   const [deckText, setDeckText] = useState("")
   const [isLoadingDeck, setIsLoadingDeck] = useState(false)
   const [selectedAIDeck, setSelectedAIDeck] = useState<"krenko_goblins" | "hapatra_counters">("krenko_goblins")
+  const [savedDecks, setSavedDecks] = useState<SavedDeck[]>([])
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+  const [newDeckName, setNewDeckName] = useState("")
+
+  // Cargar decks guardados al montar el componente
+  useEffect(() => {
+    setSavedDecks(getSavedDecks())
+  }, [])
 
   const handleDeckTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setDeckText(e.target.value)
@@ -47,6 +56,7 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
         setPlayerDeck(cards)
         setPlayerDeckName(deckFormat.name)
         setDeckText("") // Limpiar textarea
+        setShowSaveDialog(true) // Mostrar opción de guardar
       } else {
         alert("No se pudieron cargar las cartas del mazo. Verifica los nombres.")
       }
@@ -66,6 +76,27 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
       setPlayerDeckName(deckFormat.name)
       setIsLoadingDeck(false)
     })
+  }
+
+  const loadSavedDeck = (deck: SavedDeck) => {
+    setPlayerDeck(deck.cards)
+    setPlayerDeckName(deck.name)
+  }
+
+  const handleSaveDeck = () => {
+    if (!newDeckName.trim()) return
+    
+    saveDeck(newDeckName, playerDeck)
+    setSavedDecks(getSavedDecks())
+    setNewDeckName("")
+    setShowSaveDialog(false)
+  }
+
+  const handleDeleteDeck = (id: string) => {
+    if (confirm("¿Estás seguro de que quieres eliminar este mazo?")) {
+      deleteDeck(id)
+      setSavedDecks(getSavedDecks())
+    }
   }
 
   const handleStart = () => {
@@ -113,18 +144,96 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
             
             {/* Current Deck Display */}
             <div className="rounded-xl border-2 border-primary bg-primary/10 p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-gray-800 to-green-900">
-                  <Skull className="h-6 w-6 text-green-400" />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-gray-800 to-green-900">
+                    <Skull className="h-6 w-6 text-green-400" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-foreground">{playerDeckName}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {playerDeck.length} cartas cargadas
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="font-semibold text-foreground">{playerDeckName}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {playerDeck.length} cartas cargadas
-                  </p>
-                </div>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowSaveDialog(true)}
+                  className="gap-2"
+                >
+                  <Save className="h-4 w-4" />
+                  Guardar
+                </Button>
               </div>
             </div>
+
+            {/* Save Dialog */}
+            {showSaveDialog && (
+              <div className="rounded-lg border border-primary bg-primary/10 p-4 space-y-3">
+                <div>
+                  <Label htmlFor="deck-name" className="text-sm">
+                    Nombre del mazo
+                  </Label>
+                  <Input
+                    id="deck-name"
+                    value={newDeckName}
+                    onChange={(e) => setNewDeckName(e.target.value)}
+                    placeholder="Ej: Mi Hapatra Custom"
+                    className="mt-1"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={handleSaveDeck}
+                    disabled={!newDeckName.trim()}
+                  >
+                    Guardar Mazo
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowSaveDialog(false)}
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Saved Decks */}
+            {savedDecks.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Mis mazos guardados:</Label>
+                <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto">
+                  {savedDecks.map((deck) => (
+                    <div
+                      key={deck.id}
+                      className="flex items-center justify-between rounded-lg border border-border bg-secondary/50 p-3 hover:bg-secondary transition-colors"
+                    >
+                      <button
+                        onClick={() => loadSavedDeck(deck)}
+                        className="flex-1 text-left"
+                      >
+                        <p className="font-medium text-foreground text-sm">{deck.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {deck.cardCount} cartas
+                        </p>
+                      </button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => handleDeleteDeck(deck.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Deck Loading Options */}
             <div className="space-y-3">
