@@ -12,6 +12,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { Users, Heart, Sparkles, Skull, Swords, Upload, Loader2, Trash2, Save } from "lucide-react"
 import type { GameConfig, Card } from "@/lib/mtg/types"
 import { parseDeckText, deckFormatToCards, getLegendariesFromDeck, PRESET_DECKS } from "@/lib/mtg/deck-service"
@@ -396,42 +402,132 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
                     const commander = deck.cards.find(card => card.isCommander)
                     
                     return (
-                      <div key={deck.id} className="relative group">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => loadSavedDeck(deck)}
-                          className="w-full h-32 p-0 overflow-hidden relative flex flex-col justify-end"
-                        >
-                          {/* Background image of commander */}
-                          {commander?.imageUrl ? (
-                            <img
-                              src={commander.imageUrl}
-                              alt={commander.name}
-                              className="absolute inset-0 w-full h-full object-cover opacity-60"
-                            />
-                          ) : (
-                            <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-gray-600 to-gray-800 opacity-60" />
-                          )}
-                          
-                          {/* Overlay with deck info */}
-                          <div className="relative z-10 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 w-full">
-                            <p className="font-medium text-sm text-white truncate">{deck.name}</p>
-                            <p className="text-xs text-gray-200">
-                              {commander ? `⭐ ${commander.name}` : "Sin comandante"}
-                            </p>
-                            <p className="text-xs text-gray-300">{deck.cardCount} cartas</p>
-                          </div>
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="absolute -top-2 -right-2 h-6 w-6 text-destructive hover:text-destructive bg-background border border-destructive/30 hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => handleDeleteDeck(deck.id)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
+                      <TooltipProvider key={deck.id}>
+                        <Tooltip delayDuration={200}>
+                          <TooltipTrigger asChild>
+                            <div className="relative group">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => loadSavedDeck(deck)}
+                                className="w-full h-32 p-0 overflow-hidden relative flex flex-col justify-end"
+                              >
+                                {/* Background image of commander */}
+                                {commander?.imageUrl ? (
+                                  <img
+                                    src={commander.imageUrl}
+                                    alt={commander.name}
+                                    className="absolute inset-0 w-full h-full object-cover opacity-60"
+                                  />
+                                ) : (
+                                  <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-gray-600 to-gray-800 opacity-60" />
+                                )}
+                                
+                                {/* Overlay with deck info */}
+                                <div className="relative z-10 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 w-full">
+                                  <p className="font-medium text-sm text-white truncate">{deck.name}</p>
+                                  <p className="text-xs text-gray-200">
+                                    {commander ? `⭐ ${commander.name}` : "Sin comandante"}
+                                  </p>
+                                  <p className="text-xs text-gray-300">{deck.cardCount} cartas</p>
+                                </div>
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="absolute -top-2 -right-2 h-6 w-6 text-destructive hover:text-destructive bg-background border border-destructive/30 hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={() => handleDeleteDeck(deck.id)}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="w-96 p-4">
+                            <div className="space-y-2">
+                              <h4 className="font-semibold text-sm">{deck.name}</h4>
+                              <div className="grid grid-cols-3 gap-4 max-h-96 overflow-y-auto">
+                                {(() => {
+                                  // Agrupar cartas por nombre
+                                  const cardMap = new Map<string, { card: typeof deck.cards[0], count: number }>()
+                                  deck.cards.forEach(card => {
+                                    const existing = cardMap.get(card.name)
+                                    if (existing) {
+                                      existing.count++
+                                    } else {
+                                      cardMap.set(card.name, { card, count: 1 })
+                                    }
+                                  })
+                                  
+                                  return Array.from(cardMap.values()).map((item, idx) => (
+                                    <div key={idx} className="flex flex-col items-center gap-1 relative">
+                                      {/* Stack visual - cartas apiladas */}
+                                      {item.count > 1 && (
+                                        <>
+                                          {/* Carta 3 (atrás) */}
+                                          <div className="absolute w-16 h-24 bg-gray-700 rounded border border-border/50 -translate-x-1 -translate-y-1">
+                                            {item.card.imageUrl && (
+                                              <img
+                                                src={item.card.imageUrl}
+                                                alt={item.card.name}
+                                                className="w-full h-full object-cover rounded"
+                                              />
+                                            )}
+                                          </div>
+                                          {/* Carta 2 (medio) */}
+                                          {item.count > 2 && (
+                                            <div className="absolute w-16 h-24 bg-gray-700 rounded border border-border/50 translate-x-0.5 -translate-y-0.5">
+                                              {item.card.imageUrl && (
+                                                <img
+                                                  src={item.card.imageUrl}
+                                                  alt={item.card.name}
+                                                  className="w-full h-full object-cover rounded"
+                                                />
+                                              )}
+                                            </div>
+                                          )}
+                                        </>
+                                      )}
+                                      
+                                      {/* Carta principal (frente) */}
+                                      <div className="relative z-10">
+                                        {item.card.imageUrl ? (
+                                          <div className="relative">
+                                            <img
+                                              src={item.card.imageUrl}
+                                              alt={item.card.name}
+                                              className="w-16 h-24 object-cover rounded border border-border/50"
+                                            />
+                                            {/* Cantidad si hay duplicados - dentro de la carta */}
+                                            {item.count > 1 && (
+                                              <div className="absolute bottom-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold border border-red-700 shadow-lg">
+                                                {item.count}
+                                              </div>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="relative w-16 h-24 bg-gray-700 rounded border border-border/50 flex items-center justify-center text-[8px] text-center px-1">
+                                            {item.card.name}
+                                            {/* Cantidad si hay duplicados - dentro de la carta */}
+                                            {item.count > 1 && (
+                                              <div className="absolute bottom-1 right-1 bg-red-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold border border-red-700 shadow-lg">
+                                                {item.count}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                      
+                                      <span className="text-[10px] text-muted-foreground text-center line-clamp-2 relative z-10">
+                                        {item.card.name}
+                                      </span>
+                                    </div>
+                                  ))
+                                })()}
+                              </div>
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     )
                   })}
                 </div>
