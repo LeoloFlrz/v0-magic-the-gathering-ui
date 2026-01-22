@@ -125,16 +125,6 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
     }
   }
 
-  const loadPresetDeck = (deckKey: keyof typeof PRESET_DECKS) => {
-    setIsLoadingDeck(true)
-    const deckFormat = PRESET_DECKS[deckKey]
-    deckFormatToCards(deckFormat).then((cards) => {
-      setPlayerDeck(cards)
-      setPlayerDeckName(deckFormat.name)
-      setIsLoadingDeck(false)
-    })
-  }
-
   const loadSavedDeck = (deck: SavedDeck) => {
     setPlayerDeck(deck.cards)
     setPlayerDeckName(deck.name)
@@ -400,70 +390,60 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
             {savedDecks.length > 0 && (
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground">Mis mazos guardados:</Label>
-                <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto">
-                  {savedDecks.map((deck) => (
-                    <div
-                      key={deck.id}
-                      className="flex items-center justify-between rounded-lg border border-border bg-secondary/50 p-3 hover:bg-secondary transition-colors"
-                    >
-                      <button
-                        onClick={() => loadSavedDeck(deck)}
-                        className="flex-1 text-left"
-                      >
-                        <p className="font-medium text-foreground text-sm">{deck.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {deck.cardCount} cartas
-                        </p>
-                      </button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={() => handleDeleteDeck(deck.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
+                <div className="grid grid-cols-2 gap-2">
+                  {savedDecks.map((deck) => {
+                    // Encontrar la carta del comandante
+                    const commander = deck.cards.find(card => card.isCommander)
+                    
+                    return (
+                      <div key={deck.id} className="relative group">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => loadSavedDeck(deck)}
+                          className="w-full h-32 p-0 overflow-hidden relative flex flex-col justify-end"
+                        >
+                          {/* Background image of commander */}
+                          {commander?.imageUrl ? (
+                            <img
+                              src={commander.imageUrl}
+                              alt={commander.name}
+                              className="absolute inset-0 w-full h-full object-cover opacity-60"
+                            />
+                          ) : (
+                            <div className="absolute inset-0 w-full h-full bg-gradient-to-br from-gray-600 to-gray-800 opacity-60" />
+                          )}
+                          
+                          {/* Overlay with deck info */}
+                          <div className="relative z-10 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 w-full">
+                            <p className="font-medium text-sm text-white truncate">{deck.name}</p>
+                            <p className="text-xs text-gray-200">
+                              {commander ? `⭐ ${commander.name}` : "Sin comandante"}
+                            </p>
+                            <p className="text-xs text-gray-300">{deck.cardCount} cartas</p>
+                          </div>
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="absolute -top-2 -right-2 h-6 w-6 text-destructive hover:text-destructive bg-background border border-destructive/30 hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => handleDeleteDeck(deck.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}
 
             {/* Deck Loading Options */}
             <div className="space-y-3">
-              <Label className="text-xs text-muted-foreground">Cargar otro mazo:</Label>
+              <Label className="text-xs text-muted-foreground">Pega tu mazo en formato MTG Arena:</Label>
               
-              {/* Preset Decks */}
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => loadPresetDeck("krenko_goblins")}
-                  disabled={isLoadingDeck}
-                >
-                  {isLoadingDeck ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : null}
-                  Krenko Goblins
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => loadPresetDeck("hapatra_counters")}
-                  disabled={isLoadingDeck}
-                >
-                  {isLoadingDeck ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : null}
-                  Hapatra Counters
-                </Button>
-              </div>
-
               {/* Manual Deck Input */}
               <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground">
-                  O pega tu mazo en formato MTG Arena:
-                </Label>
                 <textarea
                   value={deckText}
                   onChange={handleDeckTextChange}
