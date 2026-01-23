@@ -92,11 +92,11 @@ export function Zone({
           <div
             className={cn(
               "flex items-center justify-center rounded-lg border-2 border-dashed border-muted-foreground/30 transition-colors",
-              cardSize === "sm" ? "h-16 w-12" : cardSize === "md" ? "h-28 w-20" : "h-44 w-32",
+              cardSize === "sm" ? "h-[56px] w-10" : cardSize === "md" ? "h-[90px] w-16" : "h-[134px] w-24",
               isDragOver && "border-primary bg-primary/10"
             )}
           >
-            <span className="text-[10px] text-muted-foreground">{emptyText}</span>
+            <span className="text-[8px] text-muted-foreground">{emptyText}</span>
           </div>
         ) : faceDown ? (
           <CardBack size={cardSize} count={cards.length} onClick={onZoneClick} />

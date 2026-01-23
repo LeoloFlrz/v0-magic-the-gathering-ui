@@ -79,7 +79,7 @@ export function PlayerArea({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 rounded-xl border-2 p-3 transition-all",
+        "flex flex-col gap-1 rounded-lg border-2 p-2 transition-all min-h-0",
         isActive ? "border-primary bg-primary/5" : "border-border bg-card/50",
         isLethal && "opacity-60",
         className
@@ -187,10 +187,68 @@ export function PlayerArea({
         </div>
       </div>
 
-      {/* Main Game Area */}
-      <div className={cn("flex gap-2", isOpponent ? "flex-col-reverse" : "flex-col")}>
-        {/* Side zones (Library, Graveyard, Exile, Command) */}
-        <div className="flex gap-2">
+      {/* Main Game Area - Horizontal layout with side zones on the right */}
+      <div className="flex gap-2 flex-1 min-h-0">
+        {/* Left side: Battlefield + Hand */}
+        <div className={cn("flex flex-col gap-1 flex-1 min-w-0", isOpponent ? "flex-col-reverse" : "flex-col")}>
+          {/* Battlefield */}
+          <Battlefield
+            cards={player.zones.battlefield}
+            onCardClick={(card) => onCardClick?.(card, "battlefield")}
+            onCardRightClick={(card, e) => handleCardRightClick(card, "battlefield", e)}
+            onDrop={!isOpponent ? handleBattlefieldDrop : undefined}
+            selectedCardId={selectedCardId}
+            isOpponent={isOpponent}
+            onCardDragStart={handleCardDragStart}
+            onCardDragEnd={handleCardDragEnd}
+            attackingCreatureIds={attackingCreatureIds}
+            blockingCreatureIds={blockingCreatureIds}
+            selectedForCombatIds={selectedForCombatIds}
+          />
+
+          {/* Hand - only visible for player */}
+          {!isOpponent && (
+            <Zone
+              title="Mano"
+              cards={player.zones.hand}
+              cardSize="md"
+              onCardClick={(card) => onCardClick?.(card, "hand")}
+              selectedCardId={selectedCardId}
+              emptyText="Sin cartas en mano"
+              className="bg-secondary/40 shrink-0"
+              draggableCards
+              onCardDragStart={handleCardDragStart}
+              onCardDragEnd={handleCardDragEnd}
+              drawingCardId={drawingCardId}
+              canPlayCard={canPlayCard}
+            />
+          )}
+
+          {/* Opponent's hand (face down) */}
+          {isOpponent && (
+            <div className="flex items-center gap-1 rounded-lg border border-border/50 bg-secondary/30 p-1 shrink-0">
+              <span className="mr-2 text-xs font-medium text-muted-foreground">
+                Mano ({player.zones.hand.length})
+              </span>
+              <div className="flex gap-0.5">
+                {player.zones.hand.slice(0, 7).map((card) => (
+                  <div
+                    key={card.id}
+                    className="h-8 w-6 rounded border-2 border-purple-900 bg-gradient-to-br from-purple-800 to-purple-900"
+                  />
+                ))}
+                {player.zones.hand.length > 7 && (
+                  <span className="flex items-center text-xs text-muted-foreground">
+                    +{player.zones.hand.length - 7}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right side: Library, Graveyard, Exile, Command Zone */}
+        <div className="flex flex-col gap-1 shrink-0">
           {/* Library */}
           <Zone
             title="Biblioteca"
@@ -271,10 +329,10 @@ export function PlayerArea({
           </ContextMenu>
 
           {/* Command Zone */}
-          <div className="flex flex-col items-center gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2">
-            <span className="flex items-center gap-1 text-xs font-medium text-amber-400">
+          <div className="flex flex-col items-center gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 p-1">
+            <span className="flex items-center gap-1 text-[10px] font-medium text-amber-400">
               <Crown className="h-3 w-3" />
-              Comandante
+              Cmdr
             </span>
             {player.zones.commandZone.length > 0 ? (
               <div
@@ -288,67 +346,12 @@ export function PlayerArea({
                 />
               </div>
             ) : (
-              <div className="flex h-16 w-12 items-center justify-center rounded-lg border-2 border-dashed border-amber-500/30">
-                <span className="text-[8px] text-amber-400/50">En juego</span>
+              <div className="flex h-[50px] w-10 items-center justify-center rounded-lg border-2 border-dashed border-amber-500/30">
+                <span className="text-[7px] text-amber-400/50">En juego</span>
               </div>
             )}
           </div>
         </div>
-
-        {/* Battlefield */}
-        <Battlefield
-          cards={player.zones.battlefield}
-          onCardClick={(card) => onCardClick?.(card, "battlefield")}
-          onCardRightClick={(card, e) => handleCardRightClick(card, "battlefield", e)}
-          onDrop={!isOpponent ? handleBattlefieldDrop : undefined}
-          selectedCardId={selectedCardId}
-          isOpponent={isOpponent}
-          onCardDragStart={handleCardDragStart}
-          onCardDragEnd={handleCardDragEnd}
-          attackingCreatureIds={attackingCreatureIds}
-          blockingCreatureIds={blockingCreatureIds}
-          selectedForCombatIds={selectedForCombatIds}
-        />
-
-        {/* Hand - only visible for player */}
-        {!isOpponent && (
-          <Zone
-            title="Mano"
-            cards={player.zones.hand}
-            cardSize="md"
-            onCardClick={(card) => onCardClick?.(card, "hand")}
-            selectedCardId={selectedCardId}
-            emptyText="Sin cartas en mano"
-            className="bg-secondary/40"
-            draggableCards
-            onCardDragStart={handleCardDragStart}
-            onCardDragEnd={handleCardDragEnd}
-            drawingCardId={drawingCardId}
-            canPlayCard={canPlayCard}
-          />
-        )}
-
-        {/* Opponent's hand (face down) */}
-        {isOpponent && (
-          <div className="flex items-center gap-1 rounded-lg border border-border/50 bg-secondary/30 p-2">
-            <span className="mr-2 text-xs font-medium text-muted-foreground">
-              Mano ({player.zones.hand.length})
-            </span>
-            <div className="flex gap-1">
-              {player.zones.hand.slice(0, 7).map((card) => (
-                <div
-                  key={card.id}
-                  className="h-10 w-7 rounded border-2 border-purple-900 bg-gradient-to-br from-purple-800 to-purple-900"
-                />
-              ))}
-              {player.zones.hand.length > 7 && (
-                <span className="flex items-center text-xs text-muted-foreground">
-                  +{player.zones.hand.length - 7}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )

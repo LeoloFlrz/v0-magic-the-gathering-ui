@@ -31,9 +31,9 @@ interface CardComponentProps {
 }
 
 const sizeClasses = {
-  sm: "w-12 h-[67px] text-[6px] rounded-[4px]",
-  md: "w-20 h-[111px] text-[8px] rounded-[6px]",
-  lg: "w-32 h-[178px] text-xs rounded-[10px]",
+  sm: "w-10 h-[56px] text-[5px] rounded-[3px]",
+  md: "w-16 h-[90px] text-[7px] rounded-[4px]",
+  lg: "w-24 h-[134px] text-[10px] rounded-[6px]",
 }
 
 // Componente para renderizar símbolos de mana

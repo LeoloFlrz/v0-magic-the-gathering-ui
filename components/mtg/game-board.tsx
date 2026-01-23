@@ -1283,7 +1283,7 @@ export function GameBoard() {
   return (
     <div className="flex h-screen flex-col bg-background">
       {/* Header */}
-      <header className="shrink-0 border-b border-border bg-card px-4 py-2">
+      <header className="shrink-0 border-b border-border bg-card px-3 py-1">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
@@ -1525,7 +1525,7 @@ export function GameBoard() {
       </header>
 
       {/* Game Area */}
-      <main className="flex flex-1 flex-col gap-2 p-2">
+      <main className="flex flex-1 flex-col gap-1 p-1 overflow-auto min-h-0">
         {/* Opponent Area */}
         <PlayerArea
           player={gameState.opponent}
@@ -1626,7 +1626,7 @@ export function GameBoard() {
       </main>
 
       {/* Footer */}
-      <footer className="shrink-0 border-t border-border bg-card px-4 py-2">
+      <footer className="shrink-0 border-t border-border bg-card px-3 py-1">
         <p className="text-center text-xs text-muted-foreground">
           Arrastra cartas de la mano al campo | Clic en permanente para girar | Clic en biblioteca para robar
         </p>
