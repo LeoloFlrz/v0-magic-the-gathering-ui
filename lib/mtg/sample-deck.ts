@@ -228,6 +228,15 @@ export const blightCurseDeck: Card[] = [
     text: "Search your library for up to two basic land cards, reveal those cards, put one onto the battlefield tapped and the other into your hand, then shuffle.",
     colors: ["G"],
   },
+  {
+    id: "painful-truths",
+    name: "Painful Truths",
+    manaCost: "{2}{B}",
+    cmc: 3,
+    type: "sorcery",
+    text: "Converge — You draw X cards and lose X life, where X is the number of colors of mana spent to cast this spell.",
+    colors: ["B"],
+  },
   // Artifacts
   {
     id: "sol-ring",
@@ -310,6 +319,24 @@ export const blightCurseDeck: Card[] = [
     cmc: 0,
     type: "land",
     text: "{T}: Add one mana of any color in your commander's color identity.",
+    colors: ["C"],
+  },
+  {
+    id: "evolving-wilds",
+    name: "Evolving Wilds",
+    manaCost: "",
+    cmc: 0,
+    type: "land",
+    text: "{T}, Sacrifice this land: Search your library for a basic land card, put it onto the battlefield tapped, then shuffle.",
+    colors: ["C"],
+  },
+  {
+    id: "terramorphic-expanse",
+    name: "Terramorphic Expanse",
+    manaCost: "",
+    cmc: 0,
+    type: "land",
+    text: "{T}, Sacrifice this land: Search your library for a basic land card, put it onto the battlefield tapped, then shuffle.",
     colors: ["C"],
   },
 ]

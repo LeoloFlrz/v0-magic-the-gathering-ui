@@ -18,7 +18,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { Users, Heart, Sparkles, Skull, Swords, Upload, Loader2, Trash2, Save } from "lucide-react"
+import { Users, Heart, Sparkles, Skull, Swords, Upload, Loader2, Trash2, Save, Bug } from "lucide-react"
 import type { GameConfig, Card } from "@/lib/mtg/types"
 import { parseDeckText, deckFormatToCards, getLegendariesFromDeck, PRESET_DECKS } from "@/lib/mtg/deck-service"
 import { blightCurseDeck } from "@/lib/mtg/sample-deck"
@@ -26,9 +26,11 @@ import { getSavedDecks, saveDeck, deleteDeck, type SavedDeck } from "@/lib/mtg/d
 
 interface GameLobbyProps {
   onStartGame: (config: GameConfig) => void
+  devMode?: boolean
+  onDevModeChange?: (enabled: boolean) => void
 }
 
-export function GameLobby({ onStartGame }: GameLobbyProps) {
+export function GameLobby({ onStartGame, devMode = false, onDevModeChange }: GameLobbyProps) {
   const [playerName, setPlayerName] = useState("Jugador")
   const [playerCount, setPlayerCount] = useState<2 | 3 | 4>(2)
   const [startingLife, setStartingLife] = useState<20 | 30 | 40>(40)
@@ -684,6 +686,25 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
             </RadioGroup>
           </div>
 
+          {/* Dev Mode Toggle */}
+          <div className="flex items-center justify-between p-3 rounded-lg border border-dashed border-amber-500/50 bg-amber-500/5">
+            <div className="flex items-center gap-2">
+              <Bug className="h-4 w-4 text-amber-500" />
+              <div>
+                <span className="text-sm font-medium text-amber-600 dark:text-amber-400">Modo Desarrollo</span>
+                <p className="text-xs text-muted-foreground">Mano inicial con cartas de prueba</p>
+              </div>
+            </div>
+            <Button
+              variant={devMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => onDevModeChange?.(!devMode)}
+              className={devMode ? "bg-amber-500 hover:bg-amber-600" : ""}
+            >
+              {devMode ? "Activado" : "Desactivado"}
+            </Button>
+          </div>
+
           {/* Start Button */}
           <Button
             onClick={handleStart}
@@ -692,7 +713,7 @@ export function GameLobby({ onStartGame }: GameLobbyProps) {
             disabled={playerDeck.length === 0}
           >
             <Swords className="h-5 w-5" />
-            Comenzar Partida
+            {devMode ? "🧪 Comenzar (DEV)" : "Comenzar Partida"}
           </Button>
         </div>
 

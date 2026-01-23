@@ -60,6 +60,18 @@ import {
   executeAIPlay,
   resolveCombatDamage,
 } from "@/lib/mtg/ai-engine"
+import {
+  parseCardAbilities,
+  getActivatableAbilities,
+  canPayAbilityCost,
+  parseManaCost,
+  executeSpellEffect,
+  getManaSpentForCard,
+  parseSpellEffect,
+  type ParsedAbility,
+  type AbilityCost,
+  type AbilityEffect,
+} from "@/lib/mtg/abilities"
 
 export function GameBoard() {
   const [gameStarted, setGameStarted] = useState(false)
@@ -76,6 +88,9 @@ export function GameBoard() {
   const [aiThinking, setAiThinking] = useState(false)
   const [drawingCardId, setDrawingCardId] = useState<string | null>(null)
   const [counterTargetMode, setCounterTargetMode] = useState(false)
+  
+  // Dev mode - starts with specific test cards
+  const [devMode, setDevMode] = useState(false)
   const [combatMode, setCombatMode] = useState<"none" | "declaring_attackers" | "declaring_blockers">("none")
   const [selectedAttackers, setSelectedAttackers] = useState<string[]>([])
   const [selectedBlockers, setSelectedBlockers] = useState<{ blockerId: string; attackerId: string }[]>([])
@@ -89,6 +104,14 @@ export function GameBoard() {
   const [pendingAdvancePhase, setPendingAdvancePhase] = useState(false)
   const [gameResult, setGameResult] = useState<"victory" | "defeat" | null>(null)
   
+  // Library search state
+  const [searchLibraryMode, setSearchLibraryMode] = useState<{
+    active: boolean
+    searchFor: "basic_land" | "creature" | "any"
+    putTapped: boolean
+    sourceCardId: string | null
+  }>({ active: false, searchFor: "basic_land", putTapped: false, sourceCardId: null })
+  
   // Use ref to avoid stale closure issues with combatMode in callbacks
   const combatModeRef = useRef(combatMode)
   combatModeRef.current = combatMode
@@ -96,9 +119,58 @@ export function GameBoard() {
   const selectedAttackersRef = useRef(selectedAttackers)
   selectedAttackersRef.current = selectedAttackers
 
+  // Dev mode test cards - IDs of cards to put in starting hand
+  const DEV_TEST_CARD_IDS = [
+    "evolving-wilds",
+    "terramorphic-expanse", 
+    "painful-truths",
+    "devoted-druid",
+    "hapatra",
+  ]
+
   const handleStartGame = (config: GameConfig) => {
     setGameConfig(config)
-    setGameState(createInitialGameState(config))
+    let initialState = createInitialGameState(config)
+    
+    // In dev mode, replace hand with specific test cards
+    if (devMode) {
+      const testCards: Card[] = []
+      const remainingLibrary = [...initialState.player.zones.library]
+      
+      // Find each test card in the library and move to hand
+      for (const cardId of DEV_TEST_CARD_IDS) {
+        const cardIndex = remainingLibrary.findIndex(c => c.id === cardId)
+        if (cardIndex !== -1) {
+          testCards.push(remainingLibrary[cardIndex])
+          remainingLibrary.splice(cardIndex, 1)
+        }
+      }
+      
+      // Also add some basic lands for mana
+      const landsNeeded = 7 - testCards.length
+      for (let i = 0; i < landsNeeded && remainingLibrary.length > 0; i++) {
+        const landIndex = remainingLibrary.findIndex(c => c.type === "land")
+        if (landIndex !== -1) {
+          testCards.push(remainingLibrary[landIndex])
+          remainingLibrary.splice(landIndex, 1)
+        }
+      }
+      
+      initialState = {
+        ...initialState,
+        player: {
+          ...initialState.player,
+          zones: {
+            ...initialState.player.zones,
+            hand: testCards,
+            library: remainingLibrary,
+          },
+        },
+        log: [...initialState.log, "[DEV] Modo desarrollo activado - mano de prueba cargada"],
+      }
+    }
+    
+    setGameState(initialState)
     setGameStarted(true)
   }
 
@@ -266,11 +338,31 @@ export function GameBoard() {
         (gameState.phase === "main1" || gameState.phase === "main2") &&
         gameState.activePlayer === "player"
       ) {
+        // Check if it's a spell with effects
+        const isSpell = card.type === "instant" || card.type === "sorcery"
+        const spellAbility = isSpell ? parseSpellEffect(card) : null
+        
         setGameState((prev) => {
           if (!prev) return prev
+          
+          let newPlayer = playCard(prev.player, cardId)
+          let newOpponent = prev.opponent
+          
+          // Execute spell effects
+          if (spellAbility) {
+            const manaSpent = getManaSpentForCard(prev.player, card)
+            const spellResult = executeSpellEffect(card, newPlayer, newOpponent, manaSpent)
+            newPlayer = spellResult.player
+            newOpponent = spellResult.opponent || newOpponent
+            
+            // Log spell effects
+            spellResult.log.forEach(log => addLog(log))
+          }
+          
           return {
             ...prev,
-            player: playCard(prev.player, cardId),
+            player: newPlayer,
+            opponent: newOpponent,
           }
         })
         addLog(`Juegas ${card.name}`)
@@ -346,6 +438,180 @@ export function GameBoard() {
       setSelectedCard(null)
     },
     [addLog]
+  )
+
+  // Execute activated ability on a card
+  const executeAbility = useCallback(
+    (card: Card, zone: keyof GameZone, ability: ParsedAbility) => {
+      if (!gameState || ability.type !== "activated") return
+      
+      const cost = ability.cost
+      const effect = ability.effect
+      
+      // Check if can pay cost
+      if (cost && !canPayAbilityCost(gameState.player, card, cost)) {
+        addLog(`No puedes pagar el coste de la habilidad de ${card.name}`)
+        return
+      }
+      
+      // If effect requires library search, open the search modal first
+      if (effect?.type === "search_library") {
+        // Pay costs first
+        setGameState((prev) => {
+          if (!prev) return prev
+          let newPlayer = { ...prev.player }
+          
+          if (cost) {
+            // Pay tap cost
+            if (cost.tap) {
+              const cardIndex = newPlayer.zones.battlefield.findIndex((c) => c.id === card.id)
+              if (cardIndex !== -1) {
+                newPlayer.zones.battlefield = [...newPlayer.zones.battlefield]
+                newPlayer.zones.battlefield[cardIndex] = {
+                  ...newPlayer.zones.battlefield[cardIndex],
+                  isTapped: true,
+                }
+              }
+            }
+            
+            // Pay sacrifice cost
+            if (cost.sacrifice) {
+              newPlayer.zones.battlefield = newPlayer.zones.battlefield.filter((c) => c.id !== card.id)
+              newPlayer.zones.graveyard = [...newPlayer.zones.graveyard, card]
+            }
+          }
+          
+          return { ...prev, player: newPlayer }
+        })
+        
+        // Open search modal
+        setSearchLibraryMode({
+          active: true,
+          searchFor: effect.searchFor || "basic_land",
+          putTapped: effect.putTapped || false,
+          sourceCardId: card.id,
+        })
+        addLog(`Buscas en tu biblioteca...`)
+        setSelectedCard(null)
+        return
+      }
+      
+      setGameState((prev) => {
+        if (!prev) return prev
+        
+        let newPlayer = { ...prev.player }
+        
+        // Pay costs
+        if (cost) {
+          // Pay tap cost
+          if (cost.tap) {
+            const cardIndex = newPlayer.zones.battlefield.findIndex((c) => c.id === card.id)
+            if (cardIndex !== -1) {
+              newPlayer.zones.battlefield = [...newPlayer.zones.battlefield]
+              newPlayer.zones.battlefield[cardIndex] = {
+                ...newPlayer.zones.battlefield[cardIndex],
+                isTapped: true,
+              }
+            }
+          }
+          
+          // Pay mana cost
+          if (cost.mana) {
+            const { colors } = parseManaCost(cost.mana)
+            newPlayer.mana = { ...newPlayer.mana }
+            for (const [color, amount] of Object.entries(colors)) {
+              newPlayer.mana[color as keyof typeof newPlayer.mana] -= amount
+            }
+          }
+          
+          // Pay sacrifice cost
+          if (cost.sacrifice) {
+            newPlayer.zones.battlefield = newPlayer.zones.battlefield.filter((c) => c.id !== card.id)
+            newPlayer.zones.graveyard = [...newPlayer.zones.graveyard, card]
+          }
+          
+          // Pay put -1/-1 counter cost
+          if (cost.putCounter) {
+            const cardIndex = newPlayer.zones.battlefield.findIndex((c) => c.id === card.id)
+            if (cardIndex !== -1) {
+              newPlayer.zones.battlefield = [...newPlayer.zones.battlefield]
+              const currentCard = newPlayer.zones.battlefield[cardIndex]
+              newPlayer.zones.battlefield[cardIndex] = {
+                ...currentCard,
+                negativeCounters: (currentCard.negativeCounters || 0) + cost.putCounter.count,
+              }
+            }
+          }
+        }
+        
+        // Apply effects
+        if (effect) {
+          switch (effect.type) {
+            case "add_mana":
+              if (effect.mana && effect.manaAmount) {
+                newPlayer.mana = { ...newPlayer.mana }
+                newPlayer.mana[effect.mana] = (newPlayer.mana[effect.mana] || 0) + effect.manaAmount
+              }
+              break
+              
+            case "gain_life":
+              if (effect.amount) {
+                newPlayer.life += effect.amount
+              }
+              break
+              
+            case "draw_card":
+              if (effect.amount) {
+                for (let i = 0; i < effect.amount; i++) {
+                  if (newPlayer.zones.library.length > 0) {
+                    const drawnCard = newPlayer.zones.library[0]
+                    newPlayer.zones.library = newPlayer.zones.library.slice(1)
+                    newPlayer.zones.hand = [...newPlayer.zones.hand, drawnCard]
+                  }
+                }
+              }
+              break
+              
+            case "untap":
+              if (effect.target === "self") {
+                const cardIndex = newPlayer.zones.battlefield.findIndex((c) => c.id === card.id)
+                if (cardIndex !== -1) {
+                  newPlayer.zones.battlefield = [...newPlayer.zones.battlefield]
+                  newPlayer.zones.battlefield[cardIndex] = {
+                    ...newPlayer.zones.battlefield[cardIndex],
+                    isTapped: false,
+                  }
+                }
+              }
+              break
+              
+            case "regenerate":
+              // Regenerate effect - for now just log it (prevents next destruction)
+              break
+          }
+        }
+        
+        return { ...prev, player: newPlayer }
+      })
+      
+      // Log the ability activation
+      const costText = []
+      if (ability.cost?.tap) costText.push("girar")
+      if (ability.cost?.mana) costText.push(ability.cost.mana)
+      if (ability.cost?.sacrifice) costText.push("sacrificar")
+      if (ability.cost?.putCounter) costText.push(`poner ${ability.cost.putCounter.count} contador(es) ${ability.cost.putCounter.type}`)
+      
+      const effectText = []
+      if (effect?.type === "add_mana" && effect.mana) effectText.push(`añadir {${effect.mana}}`)
+      if (effect?.type === "gain_life") effectText.push(`ganar ${effect.amount} vida`)
+      if (effect?.type === "draw_card") effectText.push(`robar ${effect.amount} carta(s)`)
+      if (effect?.type === "untap") effectText.push("enderezar")
+      
+      addLog(`Activas habilidad de ${card.name}: ${effectText.join(", ") || ability.rawText}`)
+      
+      setSelectedCard(null)
+    },
+    [gameState, addLog]
   )
 
   // Draw card for player with animation
@@ -1174,7 +1440,7 @@ export function GameBoard() {
 
   // Show lobby if game hasn't started
   if (!gameStarted || !gameState) {
-    return <GameLobby onStartGame={handleStartGame} />
+    return <GameLobby onStartGame={handleStartGame} devMode={devMode} onDevModeChange={setDevMode} />
   }
 
   // Show mulligan phase
@@ -1462,6 +1728,13 @@ export function GameBoard() {
               <span className="hidden sm:inline">-1/-1</span>
             </Button>
 
+            {/* Dev Mode Indicator */}
+            {devMode && (
+              <span className="text-xs text-amber-400 font-medium px-2 py-1 bg-amber-400/10 rounded">
+                DEV
+              </span>
+            )}
+
             {/* Combat Buttons - Attackers */}
             {combatMode === "declaring_attackers" && (
               <Button
@@ -1630,6 +1903,7 @@ export function GameBoard() {
                 isActive={gameState.activePlayer === "player"}
                 onLifeChange={(amount) => handleLifeChange("player", amount)}
                 onCardClick={(card, zone) => handleCardClick(card, zone, "player")}
+                onCardRightClick={(card, zone) => setSelectedCard({ card, zone, owner: "player" })}
                 onDrawCard={handleDrawCard}
                 onCastCommander={handleCastCommander}
                 onPlayCard={handlePlayCard}
@@ -1696,10 +1970,146 @@ export function GameBoard() {
                   Devolver a la Mano
                 </ContextMenuItem>
               )}
+              {/* Activated Abilities */}
+              {selectedCard.zone === "battlefield" && (() => {
+                const abilities = getActivatableAbilities(gameState.player, selectedCard.card)
+                if (abilities.length === 0) return null
+                return (
+                  <>
+                    <ContextMenuSeparator />
+                    <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+                      Habilidades Activadas
+                    </div>
+                    {abilities.map((ability, index) => (
+                      <ContextMenuItem
+                        key={index}
+                        onClick={() => executeAbility(selectedCard.card, selectedCard.zone, ability)}
+                        disabled={!canPayAbilityCost(gameState.player, selectedCard.card, ability.cost || {})}
+                      >
+                        <span className="max-w-[200px] truncate">{ability.rawText}</span>
+                      </ContextMenuItem>
+                    ))}
+                  </>
+                )
+              })()}
             </ContextMenuContent>
           )}
         </ContextMenu>
       </main>
+
+      {/* Library Search Modal */}
+      <Dialog open={searchLibraryMode.active} onOpenChange={(open) => {
+        if (!open) {
+          // Cancel search - shuffle library
+          setSearchLibraryMode({ active: false, searchFor: "basic_land", putTapped: false, sourceCardId: null })
+          addLog("Cancelas la búsqueda y barajas tu biblioteca")
+        }
+      }}>
+        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ScrollText className="h-5 w-5" />
+              Buscar en Biblioteca
+            </DialogTitle>
+            <DialogDescription>
+              {searchLibraryMode.searchFor === "basic_land" 
+                ? "Selecciona una tierra básica para ponerla en el campo de batalla" 
+                : "Selecciona una carta"}
+              {searchLibraryMode.putTapped && " (entrará girada)"}
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="flex-1 max-h-[50vh]">
+            <div className="grid grid-cols-3 gap-2 p-2">
+              {gameState?.player.zones.library
+                .filter(card => {
+                  if (searchLibraryMode.searchFor === "basic_land") {
+                    // Basic lands have names like "Forest", "Swamp", "Plains", "Island", "Mountain"
+                    const basicLandNames = ["Forest", "Swamp", "Plains", "Island", "Mountain"]
+                    return card.type === "land" && basicLandNames.includes(card.name)
+                  }
+                  return true
+                })
+                .map((card) => (
+                  <div
+                    key={card.id}
+                    className="p-2 border rounded cursor-pointer hover:bg-accent hover:border-primary transition-colors"
+                    onClick={() => {
+                      // Put the selected land onto the battlefield
+                      setGameState((prev) => {
+                        if (!prev) return prev
+                        
+                        const newLibrary = prev.player.zones.library.filter(c => c.id !== card.id)
+                        // Shuffle the library
+                        const shuffledLibrary = [...newLibrary].sort(() => Math.random() - 0.5)
+                        
+                        return {
+                          ...prev,
+                          player: {
+                            ...prev.player,
+                            zones: {
+                              ...prev.player.zones,
+                              library: shuffledLibrary,
+                              battlefield: [
+                                ...prev.player.zones.battlefield,
+                                { ...card, isTapped: searchLibraryMode.putTapped },
+                              ],
+                            },
+                          },
+                        }
+                      })
+                      
+                      addLog(`Pones ${card.name} en el campo de batalla${searchLibraryMode.putTapped ? " girada" : ""} y barajas tu biblioteca`)
+                      setSearchLibraryMode({ active: false, searchFor: "basic_land", putTapped: false, sourceCardId: null })
+                    }}
+                  >
+                    <div className="text-sm font-medium">{card.name}</div>
+                    <div className="text-xs text-muted-foreground capitalize">{card.type}</div>
+                    {card.text && (
+                      <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{card.text}</div>
+                    )}
+                  </div>
+                ))}
+            </div>
+            {gameState?.player.zones.library.filter(card => {
+              if (searchLibraryMode.searchFor === "basic_land") {
+                const basicLandNames = ["Forest", "Swamp", "Plains", "Island", "Mountain"]
+                return card.type === "land" && basicLandNames.includes(card.name)
+              }
+              return true
+            }).length === 0 && (
+              <div className="text-center text-muted-foreground p-4">
+                No hay tierras básicas en tu biblioteca
+              </div>
+            )}
+          </ScrollArea>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                // Just shuffle and close
+                setGameState((prev) => {
+                  if (!prev) return prev
+                  const shuffledLibrary = [...prev.player.zones.library].sort(() => Math.random() - 0.5)
+                  return {
+                    ...prev,
+                    player: {
+                      ...prev.player,
+                      zones: {
+                        ...prev.player.zones,
+                        library: shuffledLibrary,
+                      },
+                    },
+                  }
+                })
+                addLog("No encuentras ninguna tierra y barajas tu biblioteca")
+                setSearchLibraryMode({ active: false, searchFor: "basic_land", putTapped: false, sourceCardId: null })
+              }}
+            >
+              No buscar (barajar)
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Victory/Defeat Modal */}
       <Dialog open={gameResult !== null} onOpenChange={() => {}}>

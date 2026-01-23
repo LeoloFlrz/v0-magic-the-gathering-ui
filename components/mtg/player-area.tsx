@@ -20,6 +20,7 @@ interface PlayerAreaProps {
   isActive?: boolean
   onLifeChange?: (amount: number) => void
   onCardClick?: (card: Card, zone: keyof GameZone) => void
+  onCardRightClick?: (card: Card, zone: keyof GameZone) => void
   onCardAction?: (card: Card, zone: keyof GameZone, action: string) => void
   onDrawCard?: () => void
   onCastCommander?: () => void
@@ -39,6 +40,7 @@ export function PlayerArea({
   isActive = false,
   onLifeChange,
   onCardClick,
+  onCardRightClick,
   onCardAction,
   onDrawCard,
   onCastCommander,
@@ -59,7 +61,8 @@ export function PlayerArea({
     player.poisonCounters >= 10
 
   const handleCardRightClick = (card: Card, zone: keyof GameZone, e: React.MouseEvent) => {
-    e.preventDefault()
+    // Don't preventDefault - let the ContextMenu from Radix handle the event
+    onCardRightClick?.(card, zone)
   }
 
   const handleCardDragStart = (e: React.DragEvent, card: Card) => {
