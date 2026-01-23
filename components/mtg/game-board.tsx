@@ -12,6 +12,8 @@ import {
   Sparkles,
   RefreshCw,
   Check,
+  Trophy,
+  Skull,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -85,6 +87,7 @@ export function GameBoard() {
   const [cardsDrawing, setCardsDrawing] = useState<string[]>([])
 
   const [pendingAdvancePhase, setPendingAdvancePhase] = useState(false)
+  const [gameResult, setGameResult] = useState<"victory" | "defeat" | null>(null)
 
   const handleStartGame = (config: GameConfig) => {
     setGameConfig(config)
@@ -644,6 +647,22 @@ export function GameBoard() {
     }
   }, [pendingAdvancePhase, advancePhase])
 
+  // Effect to detect victory/defeat conditions
+  useEffect(() => {
+    if (!gameState || gameResult || mulliganPhase) return
+
+    // Check if player lost (life <= 0)
+    if (gameState.player.life <= 0) {
+      setGameResult("defeat")
+      addLog("¡Has perdido! Tu vida llegó a 0.")
+    }
+    // Check if opponent lost (life <= 0)
+    else if (gameState.opponent.life <= 0) {
+      setGameResult("victory")
+      addLog("¡Victoria! La vida del oponente llegó a 0.")
+    }
+  }, [gameState?.player.life, gameState?.opponent.life, gameResult, mulliganPhase, addLog])
+
   // Pass turn (skip to cleanup)
   const passTurn = useCallback(() => {
     setGameState((prev) => {
@@ -1017,6 +1036,7 @@ export function GameBoard() {
     setMulliganAnimating(false)
     setCardsReturning([])
     setCardsDrawing([])
+    setGameResult(null)
   }
 
   // Handle mulligan
@@ -1624,6 +1644,60 @@ export function GameBoard() {
           )}
         </ContextMenu>
       </main>
+
+      {/* Victory/Defeat Modal */}
+      <Dialog open={gameResult !== null} onOpenChange={() => {}}>
+        <DialogContent className="sm:max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-center gap-3 text-2xl">
+              {gameResult === "victory" ? (
+                <>
+                  <Trophy className="h-8 w-8 text-yellow-500" />
+                  <span className="text-yellow-500">¡Victoria!</span>
+                  <Trophy className="h-8 w-8 text-yellow-500" />
+                </>
+              ) : (
+                <>
+                  <Skull className="h-8 w-8 text-red-500" />
+                  <span className="text-red-500">Derrota</span>
+                  <Skull className="h-8 w-8 text-red-500" />
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription className="text-center pt-4">
+              {gameResult === "victory" ? (
+                <span className="text-lg">¡Has derrotado a tu oponente! La vida del oponente llegó a 0.</span>
+              ) : (
+                <span className="text-lg">Tu vida ha llegado a 0. Mejor suerte la próxima vez.</span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-center gap-4 pt-6">
+            <Button
+              variant="outline"
+              onClick={resetGame}
+              className="gap-2"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Volver al Lobby
+            </Button>
+            <Button
+              onClick={() => {
+                if (gameConfig) {
+                  setGameResult(null)
+                  setGameState(createInitialGameState(gameConfig))
+                  setMulliganPhase(true)
+                  setMulliganCount(0)
+                }
+              }}
+              className="gap-2"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Jugar de Nuevo
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Footer */}
       <footer className="shrink-0 border-t border-border bg-card px-3 py-1">
