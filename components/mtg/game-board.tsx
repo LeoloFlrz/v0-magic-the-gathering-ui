@@ -112,6 +112,9 @@ export function GameBoard() {
     sourceCardId: string | null
   }>({ active: false, searchFor: "basic_land", putTapped: false, sourceCardId: null })
   
+  // Dev mode - add card from deck to hand
+  const [devCardPickerOpen, setDevCardPickerOpen] = useState(false)
+  
   // Use ref to avoid stale closure issues with combatMode in callbacks
   const combatModeRef = useRef(combatMode)
   combatModeRef.current = combatMode
@@ -1728,11 +1731,22 @@ export function GameBoard() {
               <span className="hidden sm:inline">-1/-1</span>
             </Button>
 
-            {/* Dev Mode Indicator */}
+            {/* Dev Mode Controls */}
             {devMode && (
-              <span className="text-xs text-amber-400 font-medium px-2 py-1 bg-amber-400/10 rounded">
-                DEV
-              </span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDevCardPickerOpen(true)}
+                  className="gap-1 border-amber-400/50 text-amber-400 hover:bg-amber-400/10"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  <span className="hidden sm:inline">Añadir Carta</span>
+                </Button>
+                <span className="text-xs text-amber-400 font-medium px-2 py-1 bg-amber-400/10 rounded">
+                  DEV
+                </span>
+              </div>
             )}
 
             {/* Combat Buttons - Attackers */}
@@ -2107,6 +2121,97 @@ export function GameBoard() {
             >
               No buscar (barajar)
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dev Mode - Add Card to Hand Modal */}
+      <Dialog open={devCardPickerOpen} onOpenChange={setDevCardPickerOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-400">
+              <Sparkles className="h-5 w-5" />
+              Dev Mode - Añadir Carta a la Mano
+            </DialogTitle>
+            <DialogDescription>
+              Selecciona una carta de tu biblioteca para añadirla a tu mano
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto max-h-[55vh] border rounded-md">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-2">
+              {/* Show unique cards from library, grouped by name */}
+              {gameState?.player.zones.library
+                .reduce((acc, card) => {
+                  if (!acc.find(c => c.name === card.name)) {
+                    acc.push(card)
+                  }
+                  return acc
+                }, [] as Card[])
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((card) => {
+                  const count = gameState?.player.zones.library.filter(c => c.name === card.name).length || 0
+                  return (
+                    <div
+                      key={card.id}
+                      className="p-2 border rounded cursor-pointer hover:bg-amber-400/10 hover:border-amber-400 transition-colors"
+                      onClick={() => {
+                        // Find the actual card in library and move it to hand
+                        const cardInLibrary = gameState?.player.zones.library.find(c => c.name === card.name)
+                        if (!cardInLibrary) return
+                        
+                        setGameState((prev) => {
+                          if (!prev) return prev
+                          
+                          // Remove one instance from library
+                          let removed = false
+                          const newLibrary = prev.player.zones.library.filter(c => {
+                            if (!removed && c.name === card.name) {
+                              removed = true
+                              return false
+                            }
+                            return true
+                          })
+                          
+                          return {
+                            ...prev,
+                            player: {
+                              ...prev.player,
+                              zones: {
+                                ...prev.player.zones,
+                                library: newLibrary,
+                                hand: [...prev.player.zones.hand, cardInLibrary],
+                              },
+                            },
+                          }
+                        })
+                        
+                        addLog(`[DEV] Añades ${card.name} a tu mano`)
+                        setDevCardPickerOpen(false)
+                      }}
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="text-sm font-medium">{card.name}</div>
+                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded">x{count}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground capitalize">{card.type}</div>
+                      {card.manaCost && (
+                        <div className="text-xs text-muted-foreground">{card.manaCost}</div>
+                      )}
+                      {card.power !== undefined && card.toughness !== undefined && (
+                        <div className="text-xs font-medium mt-1">{card.power}/{card.toughness}</div>
+                      )}
+                      {card.text && (
+                        <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{card.text}</div>
+                      )}
+                    </div>
+                  )
+                })}
+            </div>
+            {(!gameState?.player.zones.library || gameState.player.zones.library.length === 0) && (
+              <div className="text-center text-muted-foreground p-4">
+                No hay cartas en tu biblioteca
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
