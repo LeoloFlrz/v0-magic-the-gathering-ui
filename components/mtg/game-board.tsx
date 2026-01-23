@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import {
   RotateCcw,
   SkipForward,
@@ -88,6 +88,13 @@ export function GameBoard() {
 
   const [pendingAdvancePhase, setPendingAdvancePhase] = useState(false)
   const [gameResult, setGameResult] = useState<"victory" | "defeat" | null>(null)
+  
+  // Use ref to avoid stale closure issues with combatMode in callbacks
+  const combatModeRef = useRef(combatMode)
+  combatModeRef.current = combatMode
+  
+  const selectedAttackersRef = useRef(selectedAttackers)
+  selectedAttackersRef.current = selectedAttackers
 
   const handleStartGame = (config: GameConfig) => {
     setGameConfig(config)
@@ -109,6 +116,17 @@ export function GameBoard() {
   const handleCardClick = useCallback(
     (card: Card, zone: keyof GameZone, owner: "player" | "opponent") => {
       if (!gameState) return
+      
+      // Use ref to get current combatMode value (avoids stale closure)
+      const currentCombatMode = combatModeRef.current
+      
+      // Debug logging
+      console.log("=== CARD CLICK ===")
+      console.log("Card:", card.name, "Type:", card.type)
+      console.log("Zone:", zone, "Owner:", owner)
+      console.log("CombatMode:", currentCombatMode)
+      console.log("Is creature?", card.type === "creature")
+      console.log("Conditions met?", currentCombatMode === "declaring_attackers" && zone === "battlefield" && owner === "player" && card.type === "creature")
 
       // Counter target mode - add -1/-1 counter
       if (counterTargetMode && zone === "battlefield") {
@@ -126,7 +144,7 @@ export function GameBoard() {
       }
 
       // Combat: Declaring attackers
-      if (combatMode === "declaring_attackers" && zone === "battlefield" && owner === "player" && card.type === "creature") {
+      if (currentCombatMode === "declaring_attackers" && zone === "battlefield" && owner === "player" && card.type === "creature") {
         if (card.isTapped) {
           addLog(`${card.name} está girada y no puede atacar`)
           return
@@ -142,7 +160,7 @@ export function GameBoard() {
       }
 
       // Combat: Declaring blockers - select blocker
-      if (combatMode === "declaring_blockers" && zone === "battlefield" && owner === "player" && card.type === "creature") {
+      if (currentCombatMode === "declaring_blockers" && zone === "battlefield" && owner === "player" && card.type === "creature") {
         if (card.isTapped) {
           addLog(`${card.name} está girada y no puede bloquear`)
           return
@@ -161,7 +179,7 @@ export function GameBoard() {
       }
 
       // Combat: Declaring blockers - select attacker to block
-      if (combatMode === "declaring_blockers" && pendingBlocker && zone === "battlefield" && owner === "opponent") {
+      if (currentCombatMode === "declaring_blockers" && pendingBlocker && zone === "battlefield" && owner === "opponent") {
         const isAttacking = gameState.opponent.attackingCreatures.some((a) => a.cardId === card.id)
         if (!isAttacking) {
           addLog(`${card.name} no está atacando`)
@@ -221,7 +239,7 @@ export function GameBoard() {
 
       setSelectedCard({ card, zone, owner })
     },
-    [gameState, addLog, counterTargetMode, combatMode, selectedBlockers, pendingBlocker]
+    [gameState, addLog, counterTargetMode, selectedBlockers, pendingBlocker]
   )
 
   // Handle play card from drag and drop
@@ -411,23 +429,30 @@ export function GameBoard() {
   // Confirm attackers
   const confirmAttackers = useCallback(() => {
     if (!gameState) return
+    
+    // Use ref to get current selectedAttackers
+    const currentAttackers = selectedAttackersRef.current
+    console.log("confirmAttackers called", { currentAttackers })
 
-    // Tap attacking creatures and set them as attackers
+    // First, advance the phase BEFORE resetting combat mode
+    // This prevents the useEffect from re-entering attack mode
     setGameState((prev) => {
       if (!prev) return prev
       
-      const attackingCreatures = selectedAttackers.map((id) => ({
+      const attackingCreatures = currentAttackers.map((id) => ({
         cardId: id,
         targetPlayerId: "opponent" as const,
       }))
 
       // Tap attacking creatures
       const newBattlefield = prev.player.zones.battlefield.map((c) =>
-        selectedAttackers.includes(c.id) ? { ...c, isTapped: true } : c
+        currentAttackers.includes(c.id) ? { ...c, isTapped: true } : c
       )
 
+      // Advance to combat_blockers phase directly
       return {
         ...prev,
+        phase: "combat_blockers" as GamePhase,
         player: {
           ...prev.player,
           attackingCreatures,
@@ -439,8 +464,8 @@ export function GameBoard() {
       }
     })
 
-    if (selectedAttackers.length > 0) {
-      const attackerNames = selectedAttackers
+    if (currentAttackers.length > 0) {
+      const attackerNames = currentAttackers
         .map((id) => gameState.player.zones.battlefield.find((c) => c.id === id)?.name)
         .filter(Boolean)
         .join(", ")
@@ -451,7 +476,7 @@ export function GameBoard() {
 
     setCombatMode("none")
     setSelectedAttackers([])
-  }, [gameState, selectedAttackers, addLog])
+  }, [gameState, addLog])
 
   // Start declaring blockers
   const startDeclareBlockers = useCallback(() => {
@@ -500,10 +525,10 @@ export function GameBoard() {
     setSelectedBlockers([])
     setPendingBlocker(null)
     
-    // If AI was attacking, signal to advance to combat damage phase
-    if (gameState.activePlayer === "opponent") {
+    // Auto-advance to combat damage phase
+    setTimeout(() => {
       setPendingAdvancePhase(true)
-    }
+    }, 100)
   }, [gameState, selectedBlockers, addLog])
 
   // Cancel combat selection
@@ -640,12 +665,15 @@ export function GameBoard() {
   useEffect(() => {
     if (pendingAdvancePhase) {
       setPendingAdvancePhase(false)
+      console.log("=== PENDING ADVANCE PHASE ===")
+      console.log("Current phase:", gameState?.phase)
+      console.log("Player attacking creatures:", gameState?.player.attackingCreatures.length)
       const timeout = setTimeout(() => {
         advancePhase()
       }, 300)
       return () => clearTimeout(timeout)
     }
-  }, [pendingAdvancePhase, advancePhase])
+  }, [pendingAdvancePhase, advancePhase, gameState?.phase, gameState?.player.attackingCreatures.length])
 
   // Effect to detect victory/defeat conditions
   useEffect(() => {
@@ -671,9 +699,9 @@ export function GameBoard() {
       const newActivePlayer = prev.activePlayer === "player" ? "opponent" : "player"
       const newTurn = newActivePlayer === "player" ? prev.turn + 1 : prev.turn
       
-      const newState = {
+      const newState: GameState = {
         ...prev,
-        phase: "untap",
+        phase: "untap" as GamePhase,
         turn: newTurn,
         activePlayer: newActivePlayer,
         priorityPlayer: newActivePlayer,
@@ -753,6 +781,68 @@ export function GameBoard() {
   useEffect(() => {
     if (!gameState || gameState.activePlayer !== "player") return
     
+    // Auto-enter attack mode when reaching combat_attackers phase (only if no attackers yet)
+    if (gameState.phase === "combat_attackers" && combatMode === "none" && gameState.player.attackingCreatures.length === 0) {
+      // Use timeout to ensure state is properly synchronized
+      const timeout = setTimeout(() => {
+        setCombatMode("declaring_attackers")
+        setSelectedAttackers([])
+        addLog("Selecciona las criaturas que atacarán (o confirma sin seleccionar para no atacar)")
+      }, 50)
+      return () => clearTimeout(timeout)
+    }
+    
+    // Player is attacking - AI decides blockers automatically
+    if (gameState.phase === "combat_blockers" && gameState.player.attackingCreatures.length > 0) {
+      console.log("=== AI BLOCKING PHASE ===")
+      console.log("Player attackers:", gameState.player.attackingCreatures)
+      setAiThinking(true)
+      const timeout = setTimeout(() => {
+        // AI decides blockers
+        const attackerCards = gameState.player.zones.battlefield.filter((c) =>
+          gameState.player.attackingCreatures.some((a) => a.cardId === c.id)
+        )
+        
+        const aiBlockDecision = makeBlockDecision(attackerCards, gameState.opponent, gameState.player)
+        
+        if (aiBlockDecision.blocks.length > 0) {
+          setGameState((prev) => {
+            if (!prev) return prev
+            return {
+              ...prev,
+              opponent: {
+                ...prev.opponent,
+                blockingCreatures: aiBlockDecision.blocks.map((b) => ({
+                  blockerId: b.blocker.id,
+                  attackerId: b.attacker.id,
+                })),
+              },
+            }
+          })
+          addLog(aiBlockDecision.message)
+        } else {
+          addLog("La IA decide no bloquear")
+        }
+        
+        setAiThinking(false)
+        
+        // Auto-advance to combat damage
+        setTimeout(() => {
+          advancePhase()
+        }, 500)
+      }, 800)
+      
+      return () => clearTimeout(timeout)
+    }
+    
+    // No attackers in combat_blockers - skip to damage
+    if (gameState.phase === "combat_blockers" && gameState.player.attackingCreatures.length === 0) {
+      const timeout = setTimeout(() => {
+        advancePhase()
+      }, 300)
+      return () => clearTimeout(timeout)
+    }
+    
     // Auto-advance combat_damage after damage is resolved
     if (gameState.phase === "combat_damage") {
       const timeout = setTimeout(() => {
@@ -768,7 +858,7 @@ export function GameBoard() {
       }, 500)
       return () => clearTimeout(timeout)
     }
-  }, [gameState?.phase, gameState?.activePlayer, advancePhase])
+  }, [gameState?.phase, gameState?.activePlayer, gameState?.player.attackingCreatures.length, advancePhase, combatMode, addLog])
 
   // Advanced AI logic
   useEffect(() => {
@@ -1372,72 +1462,38 @@ export function GameBoard() {
               <span className="hidden sm:inline">-1/-1</span>
             </Button>
 
-            {/* Combat Buttons */}
-            {gameState.phase === "combat_attackers" && gameState.activePlayer === "player" && combatMode === "none" && (
+            {/* Combat Buttons - Attackers */}
+            {combatMode === "declaring_attackers" && (
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={startDeclareAttackers}
+                onClick={confirmAttackers}
                 className="gap-1"
               >
                 <Swords className="h-4 w-4" />
-                <span className="hidden sm:inline">Atacar</span>
+                <span className="hidden sm:inline">
+                  {selectedAttackers.length > 0 
+                    ? `Atacar (${selectedAttackers.length})` 
+                    : "No Atacar"}
+                </span>
               </Button>
             )}
 
-            {combatMode === "declaring_attackers" && (
-              <>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={confirmAttackers}
-                  className="gap-1"
-                >
-                  <Swords className="h-4 w-4" />
-                  <span className="hidden sm:inline">Confirmar ({selectedAttackers.length})</span>
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={cancelCombatSelection}
-                >
-                  Cancelar
-                </Button>
-              </>
-            )}
-
-            {gameState.phase === "combat_blockers" && 
-             gameState.opponent.attackingCreatures.length > 0 && combatMode === "none" && (
+            {/* Combat Buttons - Blockers */}
+            {combatMode === "declaring_blockers" && (
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={startDeclareBlockers}
+                onClick={confirmBlockers}
                 className="gap-1"
               >
                 <Target className="h-4 w-4" />
-                <span className="hidden sm:inline">Bloquear</span>
+                <span className="hidden sm:inline">
+                  {selectedBlockers.length > 0 
+                    ? `Bloquear (${selectedBlockers.length})` 
+                    : "No Bloquear"}
+                </span>
               </Button>
-            )}
-
-            {combatMode === "declaring_blockers" && (
-              <>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={confirmBlockers}
-                  className="gap-1"
-                >
-                  <Target className="h-4 w-4" />
-                  <span className="hidden sm:inline">Confirmar ({selectedBlockers.length})</span>
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={cancelCombatSelection}
-                >
-                  Cancelar
-                </Button>
-              </>
             )}
 
             {/* Next Phase */}
@@ -1445,7 +1501,7 @@ export function GameBoard() {
               variant="secondary"
               size="sm"
               onClick={advancePhase}
-              disabled={gameState.activePlayer !== "player"}
+              disabled={gameState.activePlayer !== "player" || combatMode !== "none"}
               className="gap-1"
             >
               <ChevronRight className="h-4 w-4" />
@@ -1457,7 +1513,7 @@ export function GameBoard() {
               variant="default"
               size="sm"
               onClick={passTurn}
-              disabled={gameState.activePlayer !== "player"}
+              disabled={gameState.activePlayer !== "player" || combatMode !== "none"}
               className="gap-1"
             >
               <SkipForward className="h-4 w-4" />
