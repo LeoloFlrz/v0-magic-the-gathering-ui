@@ -248,6 +248,7 @@ export function Battlefield({
     setIsDragOverLands(false)
     setIsDragOverCreatures(false)
     const cardId = e.dataTransfer.getData("cardId")
+    console.log('🎪 Battlefield handleDrop - cardId:', cardId, 'isLandArea:', isLandArea, 'onDrop defined:', !!onDrop)
     if (cardId && onDrop) {
       onDrop(cardId, isLandArea)
     }

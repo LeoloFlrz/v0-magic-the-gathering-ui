@@ -25,9 +25,15 @@ export interface Card {
   isLegendary?: boolean
   isTapped?: boolean
   counters?: number
+  positiveCounters?: number // +1/+1 counters
   negativeCounters?: number // -1/-1 counters
   attachedTo?: string
   isAnimating?: boolean
+  isToken?: boolean // For token creatures
+  temporaryEffects?: {    // Effects that last until end of turn
+    powerMod?: number
+    toughnessMod?: number
+  }
 }
 
 export type AIDeckType = "krenko_goblins" | "talrand_control" | "omnath_landfall" | "edgar_vampires" | "hapatra_counters"

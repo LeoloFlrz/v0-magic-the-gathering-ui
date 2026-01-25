@@ -509,7 +509,12 @@ export function untapAll(player: Player): Player {
     mana: { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 }, // Reset mana pool
     zones: {
       ...player.zones,
-      battlefield: player.zones.battlefield.map((c) => ({ ...c, isTapped: false })),
+      battlefield: player.zones.battlefield.map((c) => ({ 
+        ...c, 
+        isTapped: false,
+        // Clear temporary effects (until end of turn effects)
+        temporaryEffects: undefined,
+      })),
     },
   }
 }

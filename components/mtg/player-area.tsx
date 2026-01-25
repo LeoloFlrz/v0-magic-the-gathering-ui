@@ -74,6 +74,7 @@ export function PlayerArea({
   }
 
   const handleBattlefieldDrop = (cardId: string) => {
+    console.log('🎯 handleBattlefieldDrop - cardId:', cardId, 'onPlayCard defined:', !!onPlayCard)
     if (onPlayCard) {
       onPlayCard(cardId)
     }

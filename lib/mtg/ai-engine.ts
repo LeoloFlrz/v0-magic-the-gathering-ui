@@ -1,10 +1,12 @@
 import type { GameState, Player, Card, GamePhase } from "./types"
 import { playCard, tapCard, moveCard, castCommander } from "./game-utils"
+import { processCombatDamageTriggers, processCreatureDeathTriggers, processTriggeredEffect, hasKeyword, parseCardAbilities, canPayAbilityCost } from "./abilities"
 
 export interface AIDecision {
-  type: "play_land" | "play_creature" | "play_spell" | "attack" | "block" | "cast_commander" | "pass"
+  type: "play_land" | "play_creature" | "play_spell" | "attack" | "block" | "cast_commander" | "activate_ability" | "pass"
   cardId?: string
   targetId?: string
+  abilityIndex?: number
   message: string
 }
 
@@ -131,6 +133,50 @@ export function makeMainPhaseDecision(
       type: "play_spell",
       cardId: enchantment.id,
       message: `IA juega ${enchantment.name}`,
+    }
+  }
+  
+  // Priority 6: Activate valuable abilities (like Krenko)
+  for (const permanent of aiPlayer.zones.battlefield) {
+    const abilities = parseCardAbilities(permanent)
+    
+    for (let i = 0; i < abilities.length; i++) {
+      const ability = abilities[i]
+      
+      // Check activated abilities that can be paid
+      if (ability.type === "activated" && canPayAbilityCost(aiPlayer, permanent, ability.cost)) {
+        // Krenko: Create goblins (very valuable!)
+        if (permanent.name === "Krenko, Mob Boss" && !permanent.isTapped) {
+          const goblinCount = aiPlayer.zones.battlefield.filter(c => 
+            c.subtype?.toLowerCase().includes("goblin")
+          ).length
+          
+          if (goblinCount > 0) {
+            return {
+              type: "activate_ability",
+              cardId: permanent.id,
+              abilityIndex: i,
+              message: `IA activa habilidad de ${permanent.name}: Crea ${goblinCount} tokens de Goblin`,
+            }
+          }
+        }
+        
+        // Contagion Clasp: Proliferate (if we have counters)
+        if (permanent.name === "Contagion Clasp" && ability.effect?.type === "proliferate") {
+          const hasCounters = aiPlayer.zones.battlefield.some(c => 
+            (c.positiveCounters && c.positiveCounters > 0) || 
+            (c.negativeCounters && c.negativeCounters > 0)
+          )
+          if (hasCounters || humanPlayer.poisonCounters > 0) {
+            return {
+              type: "activate_ability",
+              cardId: permanent.id,
+              abilityIndex: i,
+              message: `IA activa habilidad de ${permanent.name}: Prolifera`,
+            }
+          }
+        }
+      }
     }
   }
   
@@ -263,13 +309,40 @@ export function makeBlockDecision(
 export function executeAIPlay(
   gameState: GameState,
   decision: AIDecision
-): { newState: GameState; tappedLands: string[] } {
+): { newState: GameState; tappedLands: string[]; logs?: string[] } {
   let newOpponent = gameState.opponent
   const tappedLands: string[] = []
+  const logs: string[] = []
   
   if (decision.type === "play_land" && decision.cardId) {
     newOpponent = playCard(newOpponent, decision.cardId)
     newOpponent = { ...newOpponent, hasPlayedLandThisTurn: true }
+    
+    // Process Landfall triggers for AI
+    for (const permanent of newOpponent.zones.battlefield) {
+      const permAbilities = parseCardAbilities(permanent)
+      for (const ability of permAbilities) {
+        if (ability.type === "triggered" && ability.triggerCondition === "landfall") {
+          if (ability.effect) {
+            const landfallResult = processTriggeredEffect(ability.effect, permanent, newOpponent, gameState.player)
+            newOpponent = landfallResult.player
+            // If the effect targets the player
+            if (landfallResult.opponent && landfallResult.opponent !== gameState.player) {
+              return {
+                newState: { 
+                  ...gameState, 
+                  opponent: newOpponent, 
+                  player: landfallResult.opponent 
+                },
+                tappedLands,
+                logs: landfallResult.logs,
+              }
+            }
+            logs.push(...landfallResult.logs)
+          }
+        }
+      }
+    }
   } else if (decision.type === "cast_commander") {
     newOpponent = castCommander(newOpponent)
     // Tap lands for mana
@@ -295,12 +368,190 @@ export function executeAIPlay(
         newOpponent = tapCard(newOpponent, land.id)
         tappedLands.push(land.id)
       }
+      
+      // Process ETB triggers for AI's played card
+      if (card.type === "creature" || card.type === "artifact" || card.type === "enchantment") {
+        const abilities = parseCardAbilities(card)
+        for (const ability of abilities) {
+          if (ability.type === "triggered" && ability.triggerCondition === "etb") {
+            if (ability.effect) {
+              const etbResult = processTriggeredEffect(ability.effect, card, newOpponent, gameState.player)
+              newOpponent = etbResult.player
+              // Note: ETB effects that affect opponent need to be handled
+              if (etbResult.opponent) {
+                // Return a modified game state with updated player
+                return {
+                  newState: { 
+                    ...gameState, 
+                    opponent: newOpponent, 
+                    player: etbResult.opponent 
+                  },
+                  tappedLands,
+                  logs: etbResult.logs,
+                }
+              }
+              logs.push(...etbResult.logs)
+            }
+          }
+        }
+      }
+      
+      // Process "cast spell" triggers (Talrand, Edgar Markov)
+      if (card.type === "instant" || card.type === "sorcery" || card.type === "creature") {
+        const isInstantOrSorcery = card.type === "instant" || card.type === "sorcery"
+        const isVampire = card.subtype?.toLowerCase().includes("vampire")
+        
+        for (const permanent of newOpponent.zones.battlefield) {
+          const permAbilities = parseCardAbilities(permanent)
+          for (const ability of permAbilities) {
+            if (ability.type === "triggered" && ability.triggerCondition === "cast_spell") {
+              // Talrand: Create Drake when casting instant or sorcery
+              if (permanent.name === "Talrand, Sky Summoner" && isInstantOrSorcery) {
+                const drakeToken: Card = {
+                  id: `token-drake-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                  name: "Drake",
+                  manaCost: "",
+                  cmc: 0,
+                  type: "creature",
+                  subtype: "Drake",
+                  text: "Flying",
+                  power: 2,
+                  toughness: 2,
+                  colors: ["U"],
+                  isToken: true,
+                }
+                newOpponent = {
+                  ...newOpponent,
+                  zones: {
+                    ...newOpponent.zones,
+                    battlefield: [...newOpponent.zones.battlefield, drakeToken]
+                  }
+                }
+                logs.push(`Talrand crea un token de Drake 2/2 con volar`)
+              }
+              
+              // Edgar Markov: Create Vampire when casting Vampire spell
+              if (permanent.name === "Edgar Markov" && isVampire) {
+                const vampToken: Card = {
+                  id: `token-vamp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                  name: "Vampire",
+                  manaCost: "",
+                  cmc: 0,
+                  type: "creature",
+                  subtype: "Vampire",
+                  text: "",
+                  power: 1,
+                  toughness: 1,
+                  colors: ["B"],
+                  isToken: true,
+                }
+                newOpponent = {
+                  ...newOpponent,
+                  zones: {
+                    ...newOpponent.zones,
+                    battlefield: [...newOpponent.zones.battlefield, vampToken]
+                  }
+                }
+                logs.push(`Edgar Markov crea un token de Vampiro 1/1`)
+              }
+            }
+          }
+        }
+      }
+    }
+  } else if (decision.type === "activate_ability" && decision.cardId && decision.abilityIndex !== undefined) {
+    // Activate an ability on a permanent
+    const card = newOpponent.zones.battlefield.find(c => c.id === decision.cardId)
+    if (card) {
+      const abilities = parseCardAbilities(card)
+      const ability = abilities[decision.abilityIndex]
+      
+      if (ability && ability.type === "activated") {
+        // Pay costs
+        if (ability.cost?.tap) {
+          newOpponent = tapCard(newOpponent, card.id)
+        }
+        
+        // Execute the effect
+        if (ability.effect) {
+          const effect = ability.effect
+          
+          // Create tokens (Krenko)
+          if (effect.type === "create_token") {
+            const tokenCount = effect.tokenCount === "variable" 
+              ? (effect.variableAmount === "goblins_count" 
+                  ? newOpponent.zones.battlefield.filter(c => c.subtype?.toLowerCase().includes("goblin")).length
+                  : 1)
+              : (typeof effect.tokenCount === "number" ? effect.tokenCount : 1)
+            
+            const newTokens: Card[] = []
+            for (let i = 0; i < tokenCount; i++) {
+              const token: Card = {
+                id: `token-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 9)}`,
+                name: effect.tokenName || "Token",
+                manaCost: "",
+                cmc: 0,
+                type: "creature",
+                subtype: effect.tokenName,
+                text: effect.tokenAbilities?.join(", ") || "",
+                power: effect.tokenPower || 1,
+                toughness: effect.tokenToughness || 1,
+                colors: effect.tokenColors || ["C"],
+                isToken: true,
+              }
+              newTokens.push(token)
+            }
+            newOpponent = {
+              ...newOpponent,
+              zones: {
+                ...newOpponent.zones,
+                battlefield: [...newOpponent.zones.battlefield, ...newTokens]
+              }
+            }
+            logs.push(`${card.name} crea ${tokenCount} tokens de ${effect.tokenName}`)
+          }
+          
+          // Proliferate
+          if (effect.type === "proliferate") {
+            newOpponent = {
+              ...newOpponent,
+              zones: {
+                ...newOpponent.zones,
+                battlefield: newOpponent.zones.battlefield.map(c => {
+                  if (c.positiveCounters && c.positiveCounters > 0) {
+                    return { ...c, positiveCounters: c.positiveCounters + 1 }
+                  }
+                  if (c.negativeCounters && c.negativeCounters > 0) {
+                    return { ...c, negativeCounters: c.negativeCounters + 1 }
+                  }
+                  return c
+                })
+              }
+            }
+            // Also proliferate poison on player
+            const newPlayer = { ...gameState.player }
+            if (newPlayer.poisonCounters > 0) {
+              return {
+                newState: { 
+                  ...gameState, 
+                  opponent: newOpponent,
+                  player: { ...newPlayer, poisonCounters: newPlayer.poisonCounters + 1 }
+                },
+                tappedLands,
+                logs: [...logs, `${card.name} prolifera`],
+              }
+            }
+            logs.push(`${card.name} prolifera`)
+          }
+        }
+      }
     }
   }
   
   return {
     newState: { ...gameState, opponent: newOpponent },
     tappedLands,
+    logs,
   }
 }
 
@@ -384,8 +635,10 @@ export function resolveCombatDamage(
   
   // Unblocked attackers deal damage to defending player
   const blockedAttackerIds = new Set(blocks.map((b) => b.attacker.id))
+  const unblockedAttackers: Card[] = []
   for (const attacker of attackers) {
     if (!blockedAttackerIds.has(attacker.id)) {
+      unblockedAttackers.push(attacker)
       const stats = getEffectiveStats(attacker)
       const hasInfect = attacker.text?.toLowerCase().includes("infect")
       
@@ -402,57 +655,107 @@ export function resolveCombatDamage(
     }
   }
   
+  // Process combat damage triggers for unblocked attackers
+  let updatedAttackingPlayer = { ...attackingPlayer }
+  let updatedDefendingPlayer = { ...defendingPlayer }
+  
+  for (const attacker of unblockedAttackers) {
+    const triggerResult = processCombatDamageTriggers(
+      attacker,
+      updatedAttackingPlayer,
+      updatedDefendingPlayer
+    )
+    if (triggerResult) {
+      updatedAttackingPlayer = triggerResult.attackingPlayer
+      updatedDefendingPlayer = triggerResult.defendingPlayer
+      log.push(...triggerResult.log)
+    }
+  }
+  
   // Remove dead creatures
-  const newAttackerBattlefield = attackingPlayer.zones.battlefield.filter(
+  const newAttackerBattlefield = updatedAttackingPlayer.zones.battlefield.filter(
     (c) => !deadAttackers.has(c.id)
   )
-  const deadAttackerCards = attackingPlayer.zones.battlefield.filter(
+  const deadAttackerCards = updatedAttackingPlayer.zones.battlefield.filter(
     (c) => deadAttackers.has(c.id)
   )
   
-  const newDefenderBattlefield = defendingPlayer.zones.battlefield.filter(
+  const newDefenderBattlefield = updatedDefendingPlayer.zones.battlefield.filter(
     (c) => !deadBlockers.has(c.id)
   )
-  const deadDefenderCards = defendingPlayer.zones.battlefield.filter(
+  const deadDefenderCards = updatedDefendingPlayer.zones.battlefield.filter(
     (c) => deadBlockers.has(c.id)
   )
   
-  // Move dead to graveyard (or command zone)
-  const attackerGraveyard = [...attackingPlayer.zones.graveyard]
-  const attackerCommandZone = [...attackingPlayer.zones.commandZone]
+  // Move dead to graveyard (or command zone) and process death triggers
+  const attackerGraveyard = [...updatedAttackingPlayer.zones.graveyard]
+  const attackerCommandZone = [...updatedAttackingPlayer.zones.commandZone]
+  
+  // Combine all permanents for checking death triggers
+  const allPermanents = [
+    ...updatedAttackingPlayer.zones.battlefield, 
+    ...updatedDefendingPlayer.zones.battlefield
+  ]
+  
   for (const dead of deadAttackerCards) {
     if (dead.isCommander) {
       attackerCommandZone.push({ ...dead, isTapped: false, negativeCounters: 0 })
     } else {
       attackerGraveyard.push(dead)
     }
+    
+    // Process death triggers (attacker's creature died)
+    if (!dead.isToken) {
+      const deathResult = processCreatureDeathTriggers(
+        dead, 
+        updatedAttackingPlayer, 
+        updatedDefendingPlayer, 
+        allPermanents
+      )
+      updatedAttackingPlayer = deathResult.player
+      updatedDefendingPlayer = deathResult.opponent
+      log.push(...deathResult.logs)
+    }
   }
   
-  const defenderGraveyard = [...defendingPlayer.zones.graveyard]
-  const defenderCommandZone = [...defendingPlayer.zones.commandZone]
+  const defenderGraveyard = [...updatedDefendingPlayer.zones.graveyard]
+  const defenderCommandZone = [...updatedDefendingPlayer.zones.commandZone]
   for (const dead of deadDefenderCards) {
     if (dead.isCommander) {
       defenderCommandZone.push({ ...dead, isTapped: false, negativeCounters: 0 })
     } else {
       defenderGraveyard.push(dead)
     }
+    
+    // Process death triggers (defender's creature died)
+    if (!dead.isToken) {
+      const deathResult = processCreatureDeathTriggers(
+        dead, 
+        updatedDefendingPlayer, 
+        updatedAttackingPlayer, 
+        allPermanents
+      )
+      updatedDefendingPlayer = deathResult.player
+      updatedAttackingPlayer = deathResult.opponent
+      log.push(...deathResult.logs)
+    }
   }
   
   return {
     attackingPlayer: {
-      ...attackingPlayer,
+      ...updatedAttackingPlayer,
       zones: {
-        ...attackingPlayer.zones,
+        ...updatedAttackingPlayer.zones,
         battlefield: newAttackerBattlefield,
         graveyard: attackerGraveyard,
         commandZone: attackerCommandZone,
       },
     },
     defendingPlayer: {
-      ...defendingPlayer,
-      life: defendingPlayer.life - damageToDefender,
+      ...updatedDefendingPlayer,
+      life: updatedDefendingPlayer.life - damageToDefender,
       zones: {
-        ...defendingPlayer.zones,
+        ...updatedDefendingPlayer.zones,
         battlefield: newDefenderBattlefield,
         graveyard: defenderGraveyard,
         commandZone: defenderCommandZone,

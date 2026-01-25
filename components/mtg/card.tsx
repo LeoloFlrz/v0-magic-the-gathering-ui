@@ -115,15 +115,19 @@ export function CardComponent({
   const colorClass = getCardColorClass(card)
   const textColorClass = getCardTextColorClass(card)
 
-  // Calculate modified P/T with -1/-1 counters
+  // Calculate modified P/T with counters and temporary effects
   const modifiedPower =
-    card.power !== undefined && card.negativeCounters
-      ? card.power - card.negativeCounters
+    card.power !== undefined
+      ? card.power + (card.positiveCounters || 0) - (card.negativeCounters || 0) + (card.temporaryEffects?.powerMod || 0)
       : card.power
   const modifiedToughness =
-    card.toughness !== undefined && card.negativeCounters
-      ? card.toughness - card.negativeCounters
+    card.toughness !== undefined
+      ? card.toughness + (card.positiveCounters || 0) - (card.negativeCounters || 0) + (card.temporaryEffects?.toughnessMod || 0)
       : card.toughness
+  
+  // Check if stats are buffed or debuffed
+  const isPowerBuffed = card.power !== undefined && modifiedPower !== undefined && modifiedPower > card.power
+  const isPowerDebuffed = card.power !== undefined && modifiedPower !== undefined && modifiedPower < card.power
 
   const handleDragStart = (e: React.DragEvent) => {
     setIsDragging(true)
@@ -195,16 +199,35 @@ export function CardComponent({
           </div>
 
           {/* Positive Counters (+1/+1) */}
-          {!!card.counters && card.counters > 0 && (
-            <div className="absolute bottom-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-green-400 to-green-600 text-[11px] font-bold text-white shadow-lg ring-2 ring-green-300 animate-pulse">
-              +{card.counters}
+          {!!card.positiveCounters && card.positiveCounters > 0 && (
+            <div className="absolute bottom-2 right-2 flex h-5 w-8 items-center justify-center rounded-full bg-gradient-to-br from-green-400 to-green-600 text-[8px] font-bold text-white shadow-lg ring-1 ring-green-300 animate-pulse">
+              +{card.positiveCounters}/+{card.positiveCounters}
             </div>
           )}
 
           {/* Negative Counters (-1/-1) */}
-          {!!card.negativeCounters && card.negativeCounters > 0 && (
+          {!!card.negativeCounters && card.negativeCounters > 0 && !card.positiveCounters && (
             <div className="counter-minus-effect absolute bottom-2 right-2 flex h-5 w-8 items-center justify-center rounded-full bg-gradient-to-br from-purple-500 to-purple-700 text-[8px] font-bold text-white shadow-lg ring-1 ring-purple-300 animate-pulse">
               -{card.negativeCounters}/-{card.negativeCounters}
+            </div>
+          )}
+          
+          {/* Both counters - show net effect */}
+          {!!card.positiveCounters && card.positiveCounters > 0 && !!card.negativeCounters && card.negativeCounters > 0 && (
+            <div className={cn(
+              "absolute bottom-2 right-2 flex h-5 w-10 items-center justify-center rounded-full text-[7px] font-bold text-white shadow-lg ring-1 animate-pulse",
+              (card.positiveCounters - card.negativeCounters) >= 0 
+                ? "bg-gradient-to-br from-green-400 to-green-600 ring-green-300"
+                : "bg-gradient-to-br from-purple-500 to-purple-700 ring-purple-300"
+            )}>
+              {card.positiveCounters - card.negativeCounters >= 0 ? "+" : ""}{card.positiveCounters - card.negativeCounters}/{card.positiveCounters - card.negativeCounters >= 0 ? "+" : ""}{card.positiveCounters - card.negativeCounters}
+            </div>
+          )}
+          
+          {/* Token indicator */}
+          {card.isToken && (
+            <div className="absolute left-1 top-6 flex h-4 w-4 items-center justify-center rounded-full bg-gray-500 text-[8px] font-bold text-white shadow">
+              T
             </div>
           )}
 

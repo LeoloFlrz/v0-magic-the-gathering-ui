@@ -68,6 +68,7 @@ import {
   executeSpellEffect,
   getManaSpentForCard,
   parseSpellEffect,
+  processTriggeredEffect,
   type ParsedAbility,
   type AbilityCost,
   type AbilityEffect,
@@ -107,7 +108,7 @@ export function GameBoard() {
   // Library search state
   const [searchLibraryMode, setSearchLibraryMode] = useState<{
     active: boolean
-    searchFor: "basic_land" | "creature" | "any"
+    searchFor: "basic_land" | "creature" | "any" | "basic_swamp_mountain_forest" | "basic_plains_island_swamp" | "basic_island_swamp_mountain" | "basic_plains_mountain_forest"
     putTapped: boolean
     sourceCardId: string | null
   }>({ active: false, searchFor: "basic_land", putTapped: false, sourceCardId: null })
@@ -122,9 +123,13 @@ export function GameBoard() {
   const selectedAttackersRef = useRef(selectedAttackers)
   selectedAttackersRef.current = selectedAttackers
 
+  // Ref to handlePlayCard to avoid circular dependency
+  const handlePlayCardRef = useRef<(cardId: string) => void>(() => {})
+
   // Dev mode test cards - IDs of cards to put in starting hand
   const DEV_TEST_CARD_IDS = [
-    "evolving-wilds",
+    "riveteers-overlook",
+    "obscura-storefront",
     "terramorphic-expanse", 
     "painful-truths",
     "devoted-druid",
@@ -137,17 +142,27 @@ export function GameBoard() {
     
     // In dev mode, replace hand with specific test cards
     if (devMode) {
+      console.log('🛠️ Dev Mode activado! Buscando cartas:', DEV_TEST_CARD_IDS)
       const testCards: Card[] = []
       const remainingLibrary = [...initialState.player.zones.library]
       
+      // DEBUG: Show all library card IDs
+      console.log('📚 Biblioteca tiene', remainingLibrary.length, 'cartas. Primeros 10 IDs:')
+      remainingLibrary.slice(0, 10).forEach(c => console.log('  -', c.id, '|', c.name))
+      
       // Find each test card in the library and move to hand
+      // Note: Card IDs in library are prefixed like "player-cardid-index", 
+      // so we need to check if the ID contains the original cardId
       for (const cardId of DEV_TEST_CARD_IDS) {
-        const cardIndex = remainingLibrary.findIndex(c => c.id === cardId)
+        const cardIndex = remainingLibrary.findIndex(c => c.id.includes(cardId))
+        console.log(`  Buscando ${cardId}:`, cardIndex !== -1 ? `ENCONTRADA (${remainingLibrary[cardIndex]?.id})` : 'NO ENCONTRADA')
         if (cardIndex !== -1) {
           testCards.push(remainingLibrary[cardIndex])
           remainingLibrary.splice(cardIndex, 1)
         }
       }
+      
+      console.log('🃏 Cartas de prueba encontradas:', testCards.map(c => c.name))
       
       // Also add some basic lands for mana
       const landsNeeded = 7 - testCards.length
@@ -289,26 +304,8 @@ export function GameBoard() {
         (gameState.phase === "main1" || gameState.phase === "main2") &&
         gameState.activePlayer === "player"
       ) {
-        // Check if trying to play a land and already played one this turn
-        if (card.type === "land" && gameState.player.hasPlayedLandThisTurn) {
-          addLog("Ya has jugado una tierra este turno")
-          return
-        }
-
-        // Check if has enough mana
-        if (!canPlayCard(gameState.player, card)) {
-          addLog(`No tienes suficiente mana para jugar ${card.name}`)
-          return
-        }
-
-        setGameState((prev) => {
-          if (!prev) return prev
-          return {
-            ...prev,
-            player: playCard(prev.player, card.id),
-          }
-        })
-        addLog(`Juegas ${card.name}`)
+        // Use handlePlayCard ref to properly handle ETB effects
+        handlePlayCardRef.current(card.id)
         return
       }
 
@@ -320,10 +317,20 @@ export function GameBoard() {
   // Handle play card from drag and drop
   const handlePlayCard = useCallback(
     (cardId: string) => {
-      if (!gameState) return
+      console.log('🔥 handlePlayCard INICIO - cardId:', cardId)
+      if (!gameState) {
+        console.log('❌ No hay gameState!')
+        return
+      }
 
       const card = gameState.player.zones.hand.find((c) => c.id === cardId)
-      if (!card) return
+      if (!card) {
+        console.log('❌ Carta no encontrada en mano! IDs disponibles:', gameState.player.zones.hand.map(c => c.id))
+        return
+      }
+      
+      // DEBUG: Log visible cuando se intenta jugar cualquier carta
+      console.log('🎴 handlePlayCard llamado para:', card.name, 'tipo:', card.type)
 
       // Check if trying to play a land and already played one this turn
       if (card.type === "land" && gameState.player.hasPlayedLandThisTurn) {
@@ -344,12 +351,14 @@ export function GameBoard() {
         // Check if it's a spell with effects
         const isSpell = card.type === "instant" || card.type === "sorcery"
         const spellAbility = isSpell ? parseSpellEffect(card) : null
+        const isLand = card.type === "land"
         
         setGameState((prev) => {
           if (!prev) return prev
           
           let newPlayer = playCard(prev.player, cardId)
           let newOpponent = prev.opponent
+          const logs: string[] = []
           
           // Execute spell effects
           if (spellAbility) {
@@ -357,10 +366,176 @@ export function GameBoard() {
             const spellResult = executeSpellEffect(card, newPlayer, newOpponent, manaSpent)
             newPlayer = spellResult.player
             newOpponent = spellResult.opponent || newOpponent
-            
-            // Log spell effects
-            spellResult.log.forEach(log => addLog(log))
+            spellResult.log.forEach(log => logs.push(log))
           }
+          
+          // Process ETB triggers for the played card
+          const abilities = parseCardAbilities(card)
+          let hasSacrificeSearchETB = false
+          let sacrificeSearchEffect: typeof abilities[0]["effect"] = undefined
+          
+          // FALLBACK: Detección directa por nombre para tierras Overlook
+          const overlookLands: Record<string, "basic_swamp_mountain_forest" | "basic_plains_island_swamp" | "basic_island_swamp_mountain" | "basic_plains_mountain_forest"> = {
+            "Riveteers Overlook": "basic_swamp_mountain_forest",
+            "Obscura Storefront": "basic_plains_island_swamp",
+            "Maestros Theater": "basic_island_swamp_mountain",
+            "Cabaretti Courtyard": "basic_plains_mountain_forest",
+          }
+          
+          console.log('🃏 Verificando Overlook fallback para:', card.name, 'match:', overlookLands[card.name])
+          if (overlookLands[card.name]) {
+            console.log('✅ Overlook detectada por nombre!')
+            hasSacrificeSearchETB = true
+            sacrificeSearchEffect = {
+              type: "sacrifice_search_land",
+              searchFor: overlookLands[card.name],
+              putTapped: true,
+              sacrificeSelf: true,
+              gainLife: 1,
+            }
+          } else {
+            // Try parsing from abilities
+            for (const ability of abilities) {
+              if (ability.type === "triggered" && ability.triggerCondition === "etb") {
+                // Check for sacrifice_search_land effect (Overlook lands)
+                if (ability.effect?.type === "sacrifice_search_land") {
+                  hasSacrificeSearchETB = true
+                  sacrificeSearchEffect = ability.effect
+                  // Don't process it here - we'll handle it after state update
+                } else if (ability.effect) {
+                  // Execute other ETB effects
+                  const etbResult = processTriggeredEffect(ability.effect, card, newPlayer, newOpponent)
+                  newPlayer = etbResult.player
+                  newOpponent = etbResult.opponent
+                  etbResult.logs.forEach(log => logs.push(log))
+                }
+              }
+            }
+          }
+          
+          // If this land has a sacrifice+search ETB, set up the search modal
+          console.log('🔍 Checking sacrifice+search:', { hasSacrificeSearchETB, sacrificeSearchEffect })
+          if (hasSacrificeSearchETB && sacrificeSearchEffect) {
+            console.log('✅ Entrando al bloque de sacrificio!')
+            // Sacrifice the land immediately
+            newPlayer = {
+              ...newPlayer,
+              zones: {
+                ...newPlayer.zones,
+                battlefield: newPlayer.zones.battlefield.filter(c => c.id !== card.id),
+                graveyard: [...newPlayer.zones.graveyard, card],
+              },
+            }
+            
+            // Gain life if applicable
+            if (sacrificeSearchEffect.gainLife) {
+              newPlayer.life += sacrificeSearchEffect.gainLife
+              logs.push(`Ganas ${sacrificeSearchEffect.gainLife} vida`)
+            }
+            
+            logs.push(`Sacrificas ${card.name}`)
+            logs.forEach(log => addLog(log))
+            
+            // Open search modal after state update
+            setTimeout(() => {
+              setSearchLibraryMode({
+                active: true,
+                searchFor: sacrificeSearchEffect!.searchFor || "basic_land",
+                putTapped: sacrificeSearchEffect!.putTapped || true,
+                sourceCardId: card.id,
+              })
+              addLog(`Buscas en tu biblioteca...`)
+            }, 100)
+            
+            return {
+              ...prev,
+              player: newPlayer,
+              opponent: newOpponent,
+            }
+          }
+          
+          // Process Landfall triggers on all permanents when a land enters
+          if (isLand) {
+            for (const permanent of newPlayer.zones.battlefield) {
+              const permAbilities = parseCardAbilities(permanent)
+              for (const ability of permAbilities) {
+                if (ability.type === "triggered" && ability.triggerCondition === "landfall") {
+                  if (ability.effect) {
+                    const landfallResult = processTriggeredEffect(ability.effect, permanent, newPlayer, newOpponent)
+                    newPlayer = landfallResult.player
+                    newOpponent = landfallResult.opponent
+                    landfallResult.logs.forEach(log => logs.push(log))
+                  }
+                }
+              }
+            }
+          }
+          
+          // Process "cast spell" triggers (Talrand, Edgar Markov)
+          if (card.type === "instant" || card.type === "sorcery" || card.type === "creature") {
+            const isInstantOrSorcery = card.type === "instant" || card.type === "sorcery"
+            const isVampire = card.subtype?.toLowerCase().includes("vampire")
+            
+            for (const permanent of newPlayer.zones.battlefield) {
+              const permAbilities = parseCardAbilities(permanent)
+              for (const ability of permAbilities) {
+                if (ability.type === "triggered" && ability.triggerCondition === "cast_spell") {
+                  // Talrand: Create Drake when casting instant or sorcery
+                  if (permanent.name === "Talrand, Sky Summoner" && isInstantOrSorcery) {
+                    const drakeToken: Card = {
+                      id: `token-drake-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                      name: "Drake",
+                      manaCost: "",
+                      cmc: 0,
+                      type: "creature",
+                      subtype: "Drake",
+                      text: "Flying",
+                      power: 2,
+                      toughness: 2,
+                      colors: ["U"],
+                      isToken: true,
+                    }
+                    newPlayer = {
+                      ...newPlayer,
+                      zones: {
+                        ...newPlayer.zones,
+                        battlefield: [...newPlayer.zones.battlefield, drakeToken]
+                      }
+                    }
+                    logs.push(`Talrand crea un token de Drake 2/2 con volar`)
+                  }
+                  
+                  // Edgar Markov: Create Vampire when casting Vampire spell
+                  if (permanent.name === "Edgar Markov" && isVampire) {
+                    const vampToken: Card = {
+                      id: `token-vamp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                      name: "Vampire",
+                      manaCost: "",
+                      cmc: 0,
+                      type: "creature",
+                      subtype: "Vampire",
+                      text: "",
+                      power: 1,
+                      toughness: 1,
+                      colors: ["B"],
+                      isToken: true,
+                    }
+                    newPlayer = {
+                      ...newPlayer,
+                      zones: {
+                        ...newPlayer.zones,
+                        battlefield: [...newPlayer.zones.battlefield, vampToken]
+                      }
+                    }
+                    logs.push(`Edgar Markov crea un token de Vampiro 1/1`)
+                  }
+                }
+              }
+            }
+          }
+          
+          // Log all effects
+          logs.forEach(log => addLog(log))
           
           return {
             ...prev,
@@ -373,6 +548,9 @@ export function GameBoard() {
     },
     [gameState, addLog]
   )
+
+  // Update ref after handlePlayCard is defined
+  handlePlayCardRef.current = handlePlayCard
 
   // Handle card action from context menu
   const handleCardAction = useCallback(
@@ -556,10 +734,24 @@ export function GameBoard() {
                 newPlayer.mana[effect.mana] = (newPlayer.mana[effect.mana] || 0) + effect.manaAmount
               }
               break
+            
+            case "add_mana_any":
+              // For now, add green mana by default (in full impl, player would choose)
+              if (effect.manaAmount) {
+                newPlayer.mana = { ...newPlayer.mana }
+                newPlayer.mana["G"] = (newPlayer.mana["G"] || 0) + effect.manaAmount
+              }
+              break
               
             case "gain_life":
               if (effect.amount) {
                 newPlayer.life += effect.amount
+              }
+              break
+            
+            case "lose_life":
+              if (effect.amount) {
+                newPlayer.life -= effect.amount
               }
               break
               
@@ -587,10 +779,154 @@ export function GameBoard() {
                 }
               }
               break
+            
+            case "create_token": {
+              const tokenCount = effect.tokenCount === "variable" 
+                ? (effect.variableAmount === "goblins_count" 
+                    ? newPlayer.zones.battlefield.filter(c => c.subtype?.toLowerCase().includes("goblin")).length
+                    : 1)
+                : (effect.tokenCount || 1)
+              
+              for (let i = 0; i < tokenCount; i++) {
+                const token: Card = {
+                  id: `token-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 9)}`,
+                  name: effect.tokenName || "Token",
+                  manaCost: "",
+                  cmc: 0,
+                  type: "creature",
+                  subtype: effect.tokenName,
+                  text: effect.tokenAbilities?.join(", ") || "",
+                  power: effect.tokenPower || 1,
+                  toughness: effect.tokenToughness || 1,
+                  colors: effect.tokenColors || ["C"],
+                  isToken: true,
+                }
+                newPlayer.zones.battlefield = [...newPlayer.zones.battlefield, token]
+              }
+              break
+            }
+            
+            case "deal_damage": {
+              // For now, deal damage to opponent (would need targeting UI for full implementation)
+              const damageAmount = effect.amount || 0
+              return { 
+                ...prev, 
+                player: newPlayer,
+                opponent: {
+                  ...prev.opponent,
+                  life: prev.opponent.life - damageAmount
+                }
+              }
+            }
+            
+            case "proliferate": {
+              // Add one counter to each permanent with counters
+              newPlayer.zones.battlefield = newPlayer.zones.battlefield.map(c => {
+                if (c.positiveCounters && c.positiveCounters > 0) {
+                  return { ...c, positiveCounters: c.positiveCounters + 1 }
+                }
+                if (c.negativeCounters && c.negativeCounters > 0) {
+                  return { ...c, negativeCounters: c.negativeCounters + 1 }
+                }
+                return c
+              })
+              // Also proliferate poison counters on player if any
+              if (newPlayer.poisonCounters > 0) {
+                newPlayer.poisonCounters += 1
+              }
+              // Proliferate on opponent's creatures and poison
+              const newOpponent = { ...prev.opponent }
+              newOpponent.zones = { ...newOpponent.zones }
+              newOpponent.zones.battlefield = newOpponent.zones.battlefield.map(c => {
+                if (c.positiveCounters && c.positiveCounters > 0) {
+                  return { ...c, positiveCounters: c.positiveCounters + 1 }
+                }
+                if (c.negativeCounters && c.negativeCounters > 0) {
+                  return { ...c, negativeCounters: c.negativeCounters + 1 }
+                }
+                return c
+              })
+              if (newOpponent.poisonCounters > 0) {
+                newOpponent.poisonCounters += 1
+              }
+              return { ...prev, player: newPlayer, opponent: newOpponent }
+            }
               
             case "regenerate":
               // Regenerate effect - for now just log it (prevents next destruction)
               break
+              
+            case "give_counter": {
+              // Need targeting for this - for now apply to first valid target
+              // In full implementation, player would choose target creature
+              const targetCreatures = newPlayer.zones.battlefield.filter(c => 
+                c.type?.toLowerCase().includes("creature") && c.id !== card.id
+              )
+              if (targetCreatures.length > 0 && effect.counterType && effect.counterAmount) {
+                const targetIdx = newPlayer.zones.battlefield.findIndex(c => c.id === targetCreatures[0].id)
+                if (targetIdx !== -1) {
+                  newPlayer.zones.battlefield = [...newPlayer.zones.battlefield]
+                  const targetCard = newPlayer.zones.battlefield[targetIdx]
+                  if (effect.counterType === "+1/+1") {
+                    newPlayer.zones.battlefield[targetIdx] = {
+                      ...targetCard,
+                      positiveCounters: (targetCard.positiveCounters || 0) + effect.counterAmount
+                    }
+                  } else if (effect.counterType === "-1/-1") {
+                    newPlayer.zones.battlefield[targetIdx] = {
+                      ...targetCard,
+                      negativeCounters: (targetCard.negativeCounters || 0) + effect.counterAmount
+                    }
+                  }
+                }
+              }
+              break
+            }
+            
+            case "return_to_hand": {
+              // Return target creature to hand - for now target opponent's first creature
+              const opponentCreatures = prev.opponent.zones.battlefield.filter(c => 
+                c.type?.toLowerCase().includes("creature")
+              )
+              if (opponentCreatures.length > 0) {
+                const targetCreature = opponentCreatures[0]
+                const newOpponent = { ...prev.opponent }
+                newOpponent.zones = { ...newOpponent.zones }
+                newOpponent.zones.battlefield = newOpponent.zones.battlefield.filter(c => c.id !== targetCreature.id)
+                newOpponent.zones.hand = [...newOpponent.zones.hand, targetCreature]
+                return { ...prev, player: newPlayer, opponent: newOpponent }
+              }
+              break
+            }
+            
+            case "destroy": {
+              // Destroy target - for now target opponent's first creature
+              const opponentCreatures = prev.opponent.zones.battlefield.filter(c => 
+                c.type?.toLowerCase().includes("creature")
+              )
+              if (opponentCreatures.length > 0) {
+                const targetCreature = opponentCreatures[0]
+                const newOpponent = { ...prev.opponent }
+                newOpponent.zones = { ...newOpponent.zones }
+                newOpponent.zones.battlefield = newOpponent.zones.battlefield.filter(c => c.id !== targetCreature.id)
+                if (!targetCreature.isToken) {
+                  newOpponent.zones.graveyard = [...newOpponent.zones.graveyard, targetCreature]
+                }
+                return { ...prev, player: newPlayer, opponent: newOpponent }
+              }
+              break
+            }
+            
+            case "scry": {
+              // Look at top N cards and put them back in any order (simplified: just show them in log)
+              const scryCount = effect.amount || 1
+              const topCards = newPlayer.zones.library.slice(0, scryCount)
+              if (topCards.length > 0) {
+                addLog(`Scry ${scryCount}: Ves ${topCards.map(c => c.name).join(", ")}`)
+                // In full implementation, player would reorder cards
+              }
+              break
+            }
           }
         }
         
@@ -1252,9 +1588,12 @@ export function GameBoard() {
             }
 
             // Execute the decision
-            const { newState, tappedLands } = executeAIPlay({ ...prev, opponent: newOpponent }, decision)
+            const { newState, tappedLands, logs } = executeAIPlay({ ...prev, opponent: newOpponent }, decision)
             newOpponent = newState.opponent
             addLog(decision.message)
+            if (logs) {
+              logs.forEach(log => addLog(log))
+            }
             madeAction = true
           }
 
@@ -2036,12 +2375,25 @@ export function GameBoard() {
             <div className="grid grid-cols-3 gap-2 p-2">
               {gameState?.player.zones.library
                 .filter(card => {
-                  if (searchLibraryMode.searchFor === "basic_land") {
-                    // Basic lands have names like "Forest", "Swamp", "Plains", "Island", "Mountain"
-                    const basicLandNames = ["Forest", "Swamp", "Plains", "Island", "Mountain"]
-                    return card.type === "land" && basicLandNames.includes(card.name)
+                  if (card.type !== "land") return false
+                  
+                  const basicLandNames = ["Forest", "Swamp", "Plains", "Island", "Mountain"]
+                  const cardIsBasic = basicLandNames.includes(card.name)
+                  
+                  switch (searchLibraryMode.searchFor) {
+                    case "basic_land":
+                      return cardIsBasic
+                    case "basic_swamp_mountain_forest":
+                      return card.name === "Swamp" || card.name === "Mountain" || card.name === "Forest"
+                    case "basic_plains_island_swamp":
+                      return card.name === "Plains" || card.name === "Island" || card.name === "Swamp"
+                    case "basic_island_swamp_mountain":
+                      return card.name === "Island" || card.name === "Swamp" || card.name === "Mountain"
+                    case "basic_plains_mountain_forest":
+                      return card.name === "Plains" || card.name === "Mountain" || card.name === "Forest"
+                    default:
+                      return cardIsBasic
                   }
-                  return true
                 })
                 .map((card) => (
                   <div
@@ -2085,14 +2437,27 @@ export function GameBoard() {
                 ))}
             </div>
             {gameState?.player.zones.library.filter(card => {
-              if (searchLibraryMode.searchFor === "basic_land") {
-                const basicLandNames = ["Forest", "Swamp", "Plains", "Island", "Mountain"]
-                return card.type === "land" && basicLandNames.includes(card.name)
+              if (card.type !== "land") return false
+              const basicLandNames = ["Forest", "Swamp", "Plains", "Island", "Mountain"]
+              const cardIsBasic = basicLandNames.includes(card.name)
+              
+              switch (searchLibraryMode.searchFor) {
+                case "basic_land":
+                  return cardIsBasic
+                case "basic_swamp_mountain_forest":
+                  return card.name === "Swamp" || card.name === "Mountain" || card.name === "Forest"
+                case "basic_plains_island_swamp":
+                  return card.name === "Plains" || card.name === "Island" || card.name === "Swamp"
+                case "basic_island_swamp_mountain":
+                  return card.name === "Island" || card.name === "Swamp" || card.name === "Mountain"
+                case "basic_plains_mountain_forest":
+                  return card.name === "Plains" || card.name === "Mountain" || card.name === "Forest"
+                default:
+                  return cardIsBasic
               }
-              return true
             }).length === 0 && (
               <div className="text-center text-muted-foreground p-4">
-                No hay tierras básicas en tu biblioteca
+                No hay tierras básicas válidas en tu biblioteca
               </div>
             )}
           </ScrollArea>
