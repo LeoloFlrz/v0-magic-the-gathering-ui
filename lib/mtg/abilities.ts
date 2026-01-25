@@ -226,6 +226,27 @@ function parseCost(costText: string): AbilityCost | undefined {
 // Parse effect portion of ability
 function parseEffect(effectText: string): AbilityEffect | undefined {
   const lowerText = effectText.toLowerCase()
+
+  // DEBUG: Log para saber si el texto matchea el regex
+  // eslint-disable-next-line no-console
+  if (effectText.toLowerCase().includes('woodland cemetery')) {
+    console.log('[DEBUG abilities.ts] Analizando texto:', effectText)
+  }
+  // ETB tapped unless you control a land type (Woodland Cemetery, etc)
+  const etbTappedUnlessMatch = lowerText.match(/enters (the battlefield )?tapped unless you control a ([a-z]+)( or a ([a-z]+))?/) || lowerText.match(/this land enters (the battlefield )?tapped unless you control a ([a-z]+)( or a ([a-z]+))?/)
+  if (etbTappedUnlessMatch) {
+    // eslint-disable-next-line no-console
+    console.log('[DEBUG abilities.ts] ¡Match etb_tapped_unless!', etbTappedUnlessMatch)
+    // e.g. Swamp or Forest
+    // El grupo puede variar según si está "the battlefield" o no
+    // Si hay "the battlefield", el tipo está en 3 y 5; si no, en 2 y 4
+    const type1 = etbTappedUnlessMatch[3] || etbTappedUnlessMatch[2]
+    const type2 = etbTappedUnlessMatch[5] || etbTappedUnlessMatch[4]
+    return {
+      type: "etb_tapped_unless",
+      landTypes: [type1, type2].filter(Boolean),
+    } as AbilityEffect & { landTypes: string[] }
+  }
   
   // ETB with sacrifice and search (Overlook lands from Streets of New Capenna)
   // "When this land enters, sacrifice it. When you do, search your library for a basic X, Y, or Z card"
@@ -618,16 +639,28 @@ function parseEffect(effectText: string): AbilityEffect | undefined {
 // Parse all abilities from a card's text
 export function parseCardAbilities(card: Card): ParsedAbility[] {
   if (!card.text) return []
-  
+
   const abilities: ParsedAbility[] = []
-  
-  // Split by periods and process each sentence
+
+  // Si es tierra, primero intenta parsear el texto completo para efectos ETB especiales
+  if (card.type === "land") {
+    const effect = parseEffect(card.text)
+    if (effect && effect.type === "etb_tapped_unless") {
+      abilities.push({
+        type: "triggered",
+        triggerCondition: "etb",
+        effect,
+        rawText: card.text,
+      })
+    }
+  }
+
+  // Split by periods y procesar cada frase normalmente (para otras habilidades)
   const sentences = card.text.split(/[.]\s*/).filter(s => s.trim())
-  
   for (const sentence of sentences) {
     const trimmed = sentence.trim()
     if (!trimmed) continue
-    
+
     // Check for keywords first
     const lowerSentence = trimmed.toLowerCase()
     for (const [keyword, info] of Object.entries(KEYWORDS)) {
@@ -639,15 +672,26 @@ export function parseCardAbilities(card: Card): ParsedAbility[] {
         })
       }
     }
-    
+
     // Check for activated abilities (contain ":" with cost before it)
     const activatedAbility = parseActivatedAbility(trimmed)
     if (activatedAbility) {
       abilities.push(activatedAbility)
     }
-    
+
     // Check for triggered abilities (start with "When", "Whenever", "At", "Landfall")
     if (/^(when|whenever|at\s+the|landfall|eminence)/i.test(trimmed)) {
+      // Special: Detect generic -1/-1 counter triggers
+      const lower = trimmed.toLowerCase();
+      if (lower.match(/whenever (you )?put(s| )?one or more -1\/-1 counters? (on|onto)/) ||
+          lower.match(/whenever a -1\/-1 counter is (placed|put)/)) {
+        abilities.push({
+          type: "triggered",
+          triggerCondition: "put_counter",
+          effect: undefined, // Will be filled by parseTriggeredAbility if possible
+          rawText: trimmed,
+        });
+      }
       const triggeredAbility = parseTriggeredAbility(trimmed)
       if (triggeredAbility) {
         abilities.push(triggeredAbility)
@@ -1260,6 +1304,33 @@ export function processTriggeredEffect(
   let newOpponent = { ...opponent, zones: { ...opponent.zones } }
   
   switch (effect.type) {
+    case "etb_tapped_unless": {
+      // Only applies if the card just entered the battlefield
+      // Check if player controls a land of the required type(s)
+      const landTypes = (effect as any).landTypes as string[]
+      const controlsType = landTypes.some(type =>
+        player.zones.battlefield.some((c: any) => c.type === "land" && c.name.toLowerCase().includes(type))
+      )
+      // eslint-disable-next-line no-console
+      console.log('[DEBUG processTriggeredEffect] controlas tipo?', landTypes, controlsType, player.zones.battlefield.map(c => c.name))
+      if (!controlsType) {
+        // Gira la tierra fuente
+        newPlayer.zones.battlefield = newPlayer.zones.battlefield.map((c: any) =>
+          c.id === sourceCard.id ? { ...c, isTapped: true } : c
+        )
+        // eslint-disable-next-line no-console
+        console.log('[DEBUG processTriggeredEffect] entra girada')
+        return { player: newPlayer, opponent: newOpponent, logs: [
+          `${sourceCard.name} entra girada porque no controlas ${landTypes.join(" o ")}`
+        ] }
+      } else {
+        // eslint-disable-next-line no-console
+        console.log('[DEBUG processTriggeredEffect] entra enderezada')
+        return { player, opponent, logs: [
+          `${sourceCard.name} entra enderezada porque controlas ${landTypes.join(" o ")}`
+        ] }
+      }
+    }
     case "create_token": {
       let tokenCount: number
       if (effect.tokenCount === "variable") {
@@ -1485,45 +1556,51 @@ export function processCounterTriggers(
   // Check for triggers on all permanents
   for (const permanent of newPlayer.zones.battlefield) {
     const abilities = parseCardAbilities(permanent)
-    
     for (const ability of abilities) {
       if (ability.type === "triggered" && ability.triggerCondition === "put_counter") {
-        // Hapatra - create snake tokens when -1/-1 counters are put on creatures
-        if (permanent.name === "Hapatra, Vizier of Poisons" && counterType === "-1/-1") {
-          const token: Card = {
-            id: `token-snake-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            name: "Snake",
-            manaCost: "",
-            cmc: 0,
-            type: "creature",
-            subtype: "Snake",
-            text: "Deathtouch",
-            power: 1,
-            toughness: 1,
-            colors: ["G"],
-            isToken: true,
+        // Disparar efecto genérico si existe
+        if (ability.effect) {
+          // Ejecutar el efecto definido (por ejemplo, crear tokens)
+          const result = processTriggeredEffect(ability.effect, permanent, newPlayer, newOpponent)
+          newPlayer = result.player
+          newOpponent = result.opponent
+          if (result.logs) logs.push(...result.logs)
+        } else {
+          // Compatibilidad: Hapatra y Nest of Scarabs hardcodeadas
+          if (permanent.name === "Hapatra, Vizier of Poisons" && counterType === "-1/-1") {
+            const token: Card = {
+              id: `token-snake-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              name: "Snake",
+              manaCost: "",
+              cmc: 0,
+              type: "creature",
+              subtype: "Snake",
+              text: "Deathtouch",
+              power: 1,
+              toughness: 1,
+              colors: ["G"],
+              isToken: true,
+            }
+            newPlayer.zones.battlefield = [...newPlayer.zones.battlefield, token]
+            logs.push(`Hapatra crea un token de Serpiente 1/1 con toque mortal`)
           }
-          newPlayer.zones.battlefield = [...newPlayer.zones.battlefield, token]
-          logs.push(`Hapatra crea un token de Serpiente 1/1 con toque mortal`)
-        }
-        
-        // Nest of Scarabs - create insect tokens when -1/-1 counters are put on creatures
-        if (permanent.name === "Nest of Scarabs" && counterType === "-1/-1") {
-          const token: Card = {
-            id: `token-insect-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            name: "Insect",
-            manaCost: "",
-            cmc: 0,
-            type: "creature",
-            subtype: "Insect",
-            text: "",
-            power: 1,
-            toughness: 1,
-            colors: ["B"],
-            isToken: true,
+          if (permanent.name === "Nest of Scarabs" && counterType === "-1/-1") {
+            const token: Card = {
+              id: `token-insect-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              name: "Insect",
+              manaCost: "",
+              cmc: 0,
+              type: "creature",
+              subtype: "Insect",
+              text: "",
+              power: 1,
+              toughness: 1,
+              colors: ["B"],
+              isToken: true,
+            }
+            newPlayer.zones.battlefield = [...newPlayer.zones.battlefield, token]
+            logs.push(`Nest of Scarabs crea un token de Insecto 1/1`)
           }
-          newPlayer.zones.battlefield = [...newPlayer.zones.battlefield, token]
-          logs.push(`Nest of Scarabs crea un token de Insecto 1/1`)
         }
       }
     }
@@ -1541,9 +1618,12 @@ export function processCombatDamageTriggers(
   defendingPlayer: Player
 ): TriggeredEffectResult {
   const logs: string[] = []
+  if (!attackingPlayer || !defendingPlayer) {
+    logs.push("[ERROR] attackingPlayer o defendingPlayer es undefined en processCombatDamageTriggers")
+    return { player: attackingPlayer || { id: "", name: "", life: 0, mana: { W:0,U:0,B:0,R:0,G:0,C:0 }, zones: { hand:[], battlefield:[], graveyard:[], library:[], exile:[], commandZone:[] }, commanderDamageDealt:0, commanderDamageReceived:0, poisonCounters:0, hasDrawnThisTurn:false, hasPlayedLandThisTurn:false, attackingCreatures:[], blockingCreatures:[] }, opponent: defendingPlayer || { id: "", name: "", life: 0, mana: { W:0,U:0,B:0,R:0,G:0,C:0 }, zones: { hand:[], battlefield:[], graveyard:[], library:[], exile:[], commandZone:[] }, commanderDamageDealt:0, commanderDamageReceived:0, poisonCounters:0, hasDrawnThisTurn:false, hasPlayedLandThisTurn:false, attackingCreatures:[], blockingCreatures:[] }, logs };
+  }
   let newAttacker = { ...attackingPlayer, zones: { ...attackingPlayer.zones } }
   let newDefender = { ...defendingPlayer, zones: { ...defendingPlayer.zones } }
-  
   if (!toPlayer) return { player: newAttacker, opponent: newDefender, logs }
   
   const abilities = parseCardAbilities(attacker)

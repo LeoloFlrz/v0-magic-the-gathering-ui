@@ -347,17 +347,20 @@ export function GameBoard() {
             // Try parsing from abilities
             for (const ability of abilities) {
               if (ability.type === "triggered" && ability.triggerCondition === "etb") {
-                // Check for sacrifice_search_land effect (Overlook lands)
-                if (ability.effect?.type === "sacrifice_search_land") {
-                  hasSacrificeSearchETB = true
-                  sacrificeSearchEffect = ability.effect
-                  // Don't process it here - we'll handle it after state update
-                } else if (ability.effect) {
-                  // Execute other ETB effects
-                  const etbResult = processTriggeredEffect(ability.effect, card, newPlayer, newOpponent)
-                  newPlayer = etbResult.player
-                  newOpponent = etbResult.opponent
-                  etbResult.logs.forEach(log => logs.push(log))
+                if (ability.effect) {
+                  // eslint-disable-next-line no-console
+                  console.log('[DEBUG game-board.tsx] Ejecutando ETB effect:', ability.effect)
+                  if (ability.effect.type === "sacrifice_search_land") {
+                    hasSacrificeSearchETB = true
+                    sacrificeSearchEffect = ability.effect
+                    // Don't process it here - we'll handle it after state update
+                  } else {
+                    // Ejecutar cualquier otro efecto ETB (incluyendo etb_tapped_unless)
+                    const etbResult = processTriggeredEffect(ability.effect, card, newPlayer, newOpponent)
+                    newPlayer = etbResult.player
+                    newOpponent = etbResult.opponent
+                    etbResult.logs.forEach(log => logs.push(log))
+                  }
                 }
               }
             }
