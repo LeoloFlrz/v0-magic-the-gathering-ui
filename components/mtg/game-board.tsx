@@ -126,65 +126,15 @@ export function GameBoard() {
   // Ref to handlePlayCard to avoid circular dependency
   const handlePlayCardRef = useRef<(cardId: string) => void>(() => {})
 
-  // Dev mode test cards - IDs of cards to put in starting hand
-  const DEV_TEST_CARD_IDS = [
-    "riveteers-overlook",
-    "obscura-storefront",
-    "terramorphic-expanse", 
-    "painful-truths",
-    "devoted-druid",
-    "hapatra",
-  ]
-
   const handleStartGame = (config: GameConfig) => {
     setGameConfig(config)
     let initialState = createInitialGameState(config)
     
-    // In dev mode, replace hand with specific test cards
+    // In dev mode, just add a log message (the dev card picker button will be available)
     if (devMode) {
-      console.log('🛠️ Dev Mode activado! Buscando cartas:', DEV_TEST_CARD_IDS)
-      const testCards: Card[] = []
-      const remainingLibrary = [...initialState.player.zones.library]
-      
-      // DEBUG: Show all library card IDs
-      console.log('📚 Biblioteca tiene', remainingLibrary.length, 'cartas. Primeros 10 IDs:')
-      remainingLibrary.slice(0, 10).forEach(c => console.log('  -', c.id, '|', c.name))
-      
-      // Find each test card in the library and move to hand
-      // Note: Card IDs in library are prefixed like "player-cardid-index", 
-      // so we need to check if the ID contains the original cardId
-      for (const cardId of DEV_TEST_CARD_IDS) {
-        const cardIndex = remainingLibrary.findIndex(c => c.id.includes(cardId))
-        console.log(`  Buscando ${cardId}:`, cardIndex !== -1 ? `ENCONTRADA (${remainingLibrary[cardIndex]?.id})` : 'NO ENCONTRADA')
-        if (cardIndex !== -1) {
-          testCards.push(remainingLibrary[cardIndex])
-          remainingLibrary.splice(cardIndex, 1)
-        }
-      }
-      
-      console.log('🃏 Cartas de prueba encontradas:', testCards.map(c => c.name))
-      
-      // Also add some basic lands for mana
-      const landsNeeded = 7 - testCards.length
-      for (let i = 0; i < landsNeeded && remainingLibrary.length > 0; i++) {
-        const landIndex = remainingLibrary.findIndex(c => c.type === "land")
-        if (landIndex !== -1) {
-          testCards.push(remainingLibrary[landIndex])
-          remainingLibrary.splice(landIndex, 1)
-        }
-      }
-      
       initialState = {
         ...initialState,
-        player: {
-          ...initialState.player,
-          zones: {
-            ...initialState.player.zones,
-            hand: testCards,
-            library: remainingLibrary,
-          },
-        },
-        log: [...initialState.log, "[DEV] Modo desarrollo activado - mano de prueba cargada"],
+        log: [...initialState.log, "[DEV] Modo desarrollo activado - usa el botón para añadir cartas"],
       }
     }
     
